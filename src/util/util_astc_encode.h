@@ -39,29 +39,44 @@ namespace dxvk::util {
   // Table C.2.7 (2D Block Mode Layout), column order 10 → 0, row 1:
   //     D H  B   A   R0  0 0 R2 R1   →  Width = B+4, Height = A+2
   // with bit10=D, bit9=H, bits[8:7]=B, bits[6:5]=A, bit4=R0,
-  // bits[3:2]=00, bit1=R2, bit0=R1.  Table C.2.6 reads the 3-bit R as
-  // {R0, R2, R1} with R0 most significant.
+  // bits[3:2]=00, bit1=R2, bit0=R1.
+  //
+  // C.2.6 introduces R as "a 3 bit value".  R0/R1/R2 are therefore the
+  // *bits of R* — R0 least significant, R2 most significant — which
+  // Table C.2.7 scatters across the block mode.  R must be assembled as
+  //     R = R2*4 + R1*2 + R0        (bit1, bit0, bit4)
+  // NOT in column order {R0, R2, R1}.  Reading it in column order swaps
+  // R2/R1 and shipped v1.10.3-panVK.6 as range 0..2 instead of 0..4,
+  // and v1.10.3-panVK.7 as 0..15 instead of 0..9.
   //
   // D=0 (no dual plane), H=1 (high precision range), B=0 → Width = 4,
   // A=2 → Height = 4 gives a 4x4 weight grid — exactly the block
   // footprint, so the weight infill (C.2.18) degenerates to an identity
   // mapping, texel i ← grid[i].
   //
-  // R = {R0, R2, R1} = 010 with H=1 selects Table C.2.6 row R=010:
+  // R = 010 (R2=0, R1=1, R0=0) with H=1 selects Table C.2.6 row R=010:
   //     Weight Range 0..9 — 1 quint + 1 LSB per weight, 10 levels.
   //
-  //     bit9 = 1 (H=1), bit6 = 1 (A=2), bit1 = 1 (R2=1)
-  //     → 0b010_0100_0010 = 0x242
+  //     bit9 = 1 (H=1), bit6 = 1 (A=2), bit0 = 1 (R1=1)
+  //     → 0b010_0100_0001 = 0x241
+  //
+  // 0x241 is the only non-dual-plane mode giving 4x4 + range 0..9.
+  // 0x242 (the panVK.7 mistake) is 4x4 + R=100 + H=1 = range 0..15,
+  // which needs 64 weight bits: a decoder reads past our 54 and into
+  // the endpoint data, and remaining_bits = 47 drags the endpoint range
+  // off the 7-bit choice as well — hence the corrupted textures.
   //
   // R2 and R1 cannot both be zero — that is what disambiguates row 1 from
   // rows 6-10, whose bits[1:0] are 00.
   //
-  // 10 weight levels replace the former 5 (block mode 0x51, 1 quint per
-  // weight).  The cost is one endpoint bit per value: remaining_bits =
-  // 128 - 17 - 54 = 57, so C.2.13 selects the 0..127 (7-bit) endpoint
-  // range, 8 x 7 = 56 bits, leaving exactly one padding bit.  On real
-  // content this is worth +2.09 dB (measured, rtr_astc gate --rt).
-  constexpr uint32_t kAstcBlockMode4x4 = 0x242u;
+  // 10 weight levels replace the former 5.  (The old 0x51 was wrong for
+  // the same reason: it is range 0..2, not the intended 0..4 — 0x52 was
+  // the mode that matches a 38-bit quint weight stream.)  The cost is one
+  // endpoint bit per value: remaining_bits = 128 - 17 - 54 = 57, so
+  // C.2.13 selects the 0..127 (7-bit) endpoint range, 8 x 7 = 56 bits,
+  // leaving exactly one padding bit.  On real content this is worth
+  // +2.09 dB (measured, rtr_astc gate --rt).
+  constexpr uint32_t kAstcBlockMode4x4 = 0x241u;
 
   // Table C.2.4 (Single-partition block layout):
   //     bits[10:0]  block mode
