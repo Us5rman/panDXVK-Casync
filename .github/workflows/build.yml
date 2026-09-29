@@ -20,12 +20,36 @@ jobs:
           echo "version=${SANITIZED_REF}-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
 
   # ----------------------------------------------------------------
+  # Host-native ASTC spec gate (rmchk)
+  # Independent decoder written from GL_KHR_texture_compression_astc_ldr
+  # Appendix C and cross-checked against basisu's shipped UASTC mode table.
+  # It shares no code with the encoder under test, so it can actually catch
+  # a wrong-but-legal block mode - the defect class that shipped in
+  # v1.10.3-panVK.6 (0x51, haze) and v1.10.3-panVK.7 (0x242, corruption).
+  # Runs before the cross-builds so a failing gate blocks them.
+  # ----------------------------------------------------------------
+  gate-astc-spec:
+    name: ASTC spec gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build rmchk
+        run: g++ -O2 -Wall -Wextra -o rmchk tests/host/rmchk.cpp
+
+      # Exits non-zero if the reference R reading stops reproducing basisu,
+      # if the shipped block mode is not 0x241, or if the endpoint fit drifts.
+      - name: Run rmchk
+        run: ./rmchk
+
+  # ----------------------------------------------------------------
   # MinGW x64 cross-build
   # ----------------------------------------------------------------
   build-mingw-x64:
     name: MinGW x64
     runs-on: ubuntu-latest
-    needs: [setup]
+    needs: [setup, gate-astc-spec]
     container:
       image: fedora:44
       options: --user root
@@ -68,7 +92,7 @@ jobs:
   build-mingw-x32:
     name: MinGW x32
     runs-on: ubuntu-latest
-    needs: [setup]
+    needs: [setup, gate-astc-spec]
     container:
       image: fedora:44
       options: --user root
