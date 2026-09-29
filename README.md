@@ -94,8 +94,9 @@ Current state:
 - Because the wrapper reports BC, the automatic `!textureCompressionBC` arm never opens in-container; force is what activates the transcode.
 - Transcode hot spots optimized: word-level bit extract/insert, verified bit-identical over 12,298 checks.
 
-Still missing:
+Not pursued (deliberately left open — hard to arrange, not a blocker):
 - A wrapper-free run confirming `textureCompressionBC = 0` in `d3d11.log`.
+- Lossless screenshot pair; Lloyd GTA V `logcat`/tombstone; DMC5 log; Duckten logs.
 
 > Reading a `d3d11.log`: `panDXVK: BC→ASTC gate: BC=… ASTC_LDR=… force=… -> transcode ENABLED/disabled` is printed once at device creation and states the gate's inputs directly — read it instead of inferring them. The `PANDXVK_FORCE_TRANSCODE` one-time notice only fires on the `UpdateSubresource` path, so titles that upload through the initializer show **zero** of them even with force on. The authoritative per-texture markers are the four `BC→ASTC` lines above.
 
@@ -105,7 +106,7 @@ Reported by testers in the field — recorded here as observed, not independentl
 
 - ✅ **The transcode resolves Mali's black / bad graphics.** Testers found that running BC textures through the transcode actually fixed the black or badly rendered graphics commonly seen on Mali, which come from BCN not being supported at hardware level in the first place.
 - ⚠️ **The BCN software layer is still not improved.** The wrapper's BCN software layer remains unimproved, with the reported exception of Charan's build. *(reported, not independently verified.)*
-- ⚠️ **RAM usage dropped ~5–15%.** A memory reduction somewhere in the **5%–15%** range has been heard from testers so far. Treat this as anecdotal — no measurement of ours pins down a specific figure yet.
+- ✅ **RAM usage dropped ~5–8%.** Tested **twice by Gustave**, both runs landing in the **5–8%** range. Tester-measured rather than measured by our own instrumentation, so quote it as a range, not a benchmark figure.
 - ⚠️ **Some titles still misrender under transcode.** This reads as a transcode / game-compatibility issue rather than a hardware one. For those games the combination of **`wrapper_no_patch` + PanVK + panDXVK** together fixed it — reported by **Lloyd**.
 - ⚠️ **Always check `wrapper_no_patch` before using panDXVK for gaming.** It is a **default environment variable on Winlator Mali**, so it is already set if you run that wrapper, and the same applies to any wrapper that exposes the variable — worth checking it **first**, since it is a wrapper-side setting (**0 references** in panDXVK's own source and shipped DLLs) and panDXVK neither sees nor sets it for you.
 
