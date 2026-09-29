@@ -71,6 +71,14 @@ jobs:
             sleep 10
           done
 
+      - name: Version source
+        run: |
+          echo ".git present : $(test -d .git && echo yes || echo NO)"
+          echo "git on PATH  : $(command -v git || echo NO)"
+          echo "HEAD         : $(git rev-parse --short HEAD 2>&1)"
+          echo "describe     : $(git describe --tags --dirty=+ 2>&1)"
+          echo "tags at HEAD : $(git tag --points-at HEAD 2>&1 | tr '\n' ' ')"
+
       - name: Build x64
         run: |
           chmod +x package-release.sh
@@ -113,6 +121,14 @@ jobs:
             echo "Attempt $attempt failed, retrying in 10s..."
             sleep 10
           done
+
+      - name: Version source
+        run: |
+          echo ".git present : $(test -d .git && echo yes || echo NO)"
+          echo "git on PATH  : $(command -v git || echo NO)"
+          echo "HEAD         : $(git rev-parse --short HEAD 2>&1)"
+          echo "describe     : $(git describe --tags --dirty=+ 2>&1)"
+          echo "tags at HEAD : $(git tag --points-at HEAD 2>&1 | tr '\n' ' ')"
 
       - name: Build x32
         run: |
