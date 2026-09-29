@@ -14,10 +14,22 @@ namespace dxvk::util {
 
   /**
    * \brief Checks if a DXGI format is a BC compressed format
+   *
+   * Two ranges, not one: DXGI places BC1..BC5 at 70..84, then 9 non-BC
+   * packed formats (85..93: B5G6R5, B5G5R5A1, B8G8R8A8/X8 and their
+   * TYPELESS/SRGB/R10G10B10_XR variants), then BC6H..BC7 at 94..99.
+   * A single ``>= && <=`` over 70..99 would admit all 9 — including
+   * DXGI_FORMAT_B8G8R8A8_UNORM (0x57), the common back-buffer format.
+   * Verified against mingw dxgiformat.h (BC5_SNORM=0x54, BC6H_TYPELESS=0x5e).
+   *
+   * NB: ``format >= 70 && format <= 84`` alone is wrong — it silently
+   * drops BC6H and BC7 (94..99).
    */
   inline bool isBcFormat(DXGI_FORMAT format) {
-    return format >= DXGI_FORMAT_BC1_TYPELESS
-        && format <= DXGI_FORMAT_BC7_UNORM_SRGB;
+    return (format >= DXGI_FORMAT_BC1_TYPELESS
+         && format <= DXGI_FORMAT_BC5_SNORM)
+        || (format >= DXGI_FORMAT_BC6H_TYPELESS
+         && format <= DXGI_FORMAT_BC7_UNORM_SRGB);
   }
 
 
