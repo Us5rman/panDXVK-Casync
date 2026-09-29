@@ -1,0 +1,13 @@
+#pragma once
+
+/* Short commit hash of this build, e.g. 2c575a3.
+ *
+ * Kept separate from DXVK_VERSION because `git describe` emits no hash
+ * when the build sits exactly on a release tag, and the HUD and the log
+ * must always be able to name the commit a build came from.
+ *
+ * Filled in by meson's vcs_tag() at the top of meson.build. If the git
+ * command fails this falls back to the project version, same as
+ * version.h does.
+ */
+#define PAN_DXVK_COMMIT "@VCS_TAG@"

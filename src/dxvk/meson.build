@@ -118,7 +118,10 @@ dxvk_src = files([
 
 thread_dep = dependency('threads')
 
-dxvk_lib = static_library('dxvk', dxvk_src, glsl_generator.process(dxvk_shaders), dxvk_version,
+# dxvk_version (version.h) and pandxvk_commit (pandxvk_version.h) are listed as
+# sources so meson wires the generated headers into this target; both are
+# consumed by dxvk_instance.cpp and hud/dxvk_hud_item.cpp below.
+dxvk_lib = static_library('dxvk', dxvk_src, glsl_generator.process(dxvk_shaders), dxvk_version, pandxvk_commit,
   link_with           : [ util_lib, spirv_lib ],
   dependencies        : [ thread_dep, vkcommon_dep ] + dxvk_extradep,
   include_directories : [ dxvk_include_path ],

@@ -43,6 +43,34 @@ panDXVK uses the same configuration mechanism as upstream DXVK. Set `DXVK_CONFIG
 | `DXVK_FRAME_RATE` | `0` (uncap), or FPS limit | Frame rate cap. |
 | `PANDXVK_FORCE_TRANSCODE` | `0`, `1` | Test knob: force BC→ASTC on Mali even when the driver claims BC (wrapper setups). Explicit CPU overhead. Needs game restart. |
 
+## Version String
+
+The HUD and the startup log carry the same two-part identity:
+
+```
+panDXVK 1.10.3.v8 (2c575a3)      ← HUD
+panDXVK: 1.10.3.v8 (2c575a3)     ← log
+```
+
+| Part | Example | Meaning |
+|------|---------|---------|
+| **release** | `1.10.3.v8` | Upstream DXVK `1.10.3` plus the panDXVK pre-release `.v8`, derived from the git tag `v1.10.3-panVK.8`. **Stays pinned to the last tag** until the next one is cut — a build made six commits after `panVK.8` still reports `.v8`. |
+| **commit** | `2c575a3` | Short hash of the exact commit, so a report resolves to a commit in one step. |
+
+The log also prints a second line with the raw `git describe` output
+(`DXVK: v1.10.3-panVK.8-6-g2c575a3`) for full tag / commit-count / hash detail.
+
+Both values are derived at build time, so **no manual bump is needed per release**:
+
+| Where | What |
+|-------|------|
+| `meson.build` | `git describe --tags` → `version.h` (`DXVK_VERSION`); `git rev-parse --short HEAD` → `pandxvk_version.h` (`PAN_DXVK_COMMIT`) |
+| `src/util/util_version.h` | parses `DXVK_VERSION` into `1.10.3.v8` and appends `(commit)` |
+| `src/dxvk/dxvk_instance.cpp` | startup log line |
+| `src/dxvk/hud/dxvk_hud_item.cpp` | HUD line |
+
+> **`--tags` is mandatory.** panDXVK releases are **lightweight** (unannotated) tags, and plain `git describe` refuses to use them and fails instead. Meson then silently falls back to the project version, which is why older builds logged a bare `DXVK: v1.10.3` with no release suffix at all.
+
 ## Notes
 - **I need your logs.** If you hit a crash, rendering glitch, or anything weird, grab the log file from your Wine prefix's drive_c (usually `wine_debug.log` or `d3d11.log` in the app directory) and paste it to [panDXVK Logs](https://github.com/isygold/panDXVK-logs/issues). For BC→ASTC transcode diagnostics, set `DXVK_LOG_LEVEL=debug` — the markers are runtime-gated, so no special build is needed. Without logs, I cannot help you.
 - **ASTC 4x4 is lossy.** BC1–BC7 textures are decoded to RGBA8 and re-encoded to ASTC 4x4. This introduces compression artifacts not present in the original. For most games the visual difference is minimal, but texture-heavy UIs or screenshots may show subtle banding.

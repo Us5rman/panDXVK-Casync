@@ -107,10 +107,24 @@ else
   )
 endif
 
+# --tags is required: every panDXVK release tag is a lightweight (unannotated)
+# tag, and plain `git describe` refuses to use those and fatals instead. That
+# failure is silent at build time and leaves meson's fallback (the project
+# version, "v1.10.3") in DXVK_VERSION, which is why the HUD and the log used
+# to print a version with no panVK release suffix at all.
 dxvk_version = vcs_tag(
-  command: ['git', 'describe', '--dirty=+'],
+  command: ['git', 'describe', '--tags', '--dirty=+'],
   input:  'version.h.in',
   output: 'version.h',
+)
+
+# Short commit hash, e.g. 2c575a3. Separate from DXVK_VERSION because
+# `git describe` emits no hash when built exactly on a release tag, and the
+# HUD and log must always be able to name the commit.
+pandxvk_commit = vcs_tag(
+  command: ['git', 'rev-parse', '--short', 'HEAD'],
+  input:  'pandxvk_version.h.in',
+  output: 'pandxvk_version.h',
 )
 
 subdir('src')

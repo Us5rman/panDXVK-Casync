@@ -1,5 +1,7 @@
 #include <version.h>
 
+#include "../util/util_version.h"
+
 #include "dxvk_instance.h"
 #include "dxvk_openvr.h"
 #include "dxvk_openxr.h"
@@ -11,6 +13,9 @@ namespace dxvk {
   
   DxvkInstance::DxvkInstance() {
     Logger::info(str::format("Game: ", env::getExeName()));
+    // panDXVK: label this as panDXVK (not DXVK) and carry the release
+    // identifier plus the commit, e.g. "panDXVK: 1.10.3.v8 (2c575a3)".
+    Logger::info(str::format("panDXVK: ", util::panDxvkVersionString()));
     Logger::info(str::format("DXVK: ", DXVK_VERSION));
 
     m_config = Config::getUserConfig();

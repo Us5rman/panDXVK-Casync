@@ -3,6 +3,8 @@
 #include <iomanip>
 #include <version.h>
 
+#include "../../util/util_version.h"
+
 namespace dxvk::hud {
 
   HudItem::~HudItem() {
@@ -91,7 +93,7 @@ namespace dxvk::hud {
     renderer.drawText(16.0f,
       { position.x, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
-      "panDXVK " DXVK_VERSION);
+      std::string("panDXVK ") + util::panDxvkVersionString());
 
     position.y += 8.0f;
     return position;
