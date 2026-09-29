@@ -389,6 +389,21 @@ namespace dxvk {
           "neither textureCompressionBC nor textureCompressionASTC_LDR. "
           "BC textures will NOT be remapped and cannot be rendered.");
       }
+
+      // One line, once per device creation, stating the gate's actual inputs
+      // and its decision. Without this the only way to know BC / ASTC_LDR /
+      // force was to reverse-engineer isPanVkTranscode() from the log, which
+      // produced at least one wrong conclusion on record: the notice at
+      // d3d11_context.cpp is UpdateSubresource-only, so "no notice" was read
+      // as "force off" when force was in fact on. INFO, not debug, and never
+      // on a hot path - after this a log says what the gate saw instead of
+      // leaving it to be inferred. Arrow matches the BC→ASTC marker family
+      // so one grep collects every transcode line.
+      Logger::info(str::format(
+        "panDXVK: BC→ASTC gate: BC=", supported.textureCompressionBC ? 1 : 0,
+        " ASTC_LDR=", supported.textureCompressionASTC_LDR ? 1 : 0,
+        " force=", util::forceTranscodeEnabled() ? 1 : 0,
+        " -> transcode ", isPanVkTranscode() ? "ENABLED" : "disabled"));
     }
     
     Logger::info(str::format("Device properties:"

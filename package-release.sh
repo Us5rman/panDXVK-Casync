@@ -67,6 +67,7 @@ function build_arch {
 
   meson --cross-file "$DXVK_SRC_DIR/$crossfile$1.txt" \
         --buildtype "release"                         \
+        -Db_ndebug=true                               \
         --prefix "$DXVK_BUILD_DIR"                    \
         $opt_strip                                    \
         --bindir "x$1"                                \

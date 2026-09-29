@@ -32,12 +32,17 @@ namespace dxvk {
         && util::isBcFormat(m_desc.Format)) {
       astcFormat = util::bcToAstcFormat(m_desc.Format);
       if (astcFormat != VK_FORMAT_UNDEFINED) {
-#ifndef NDEBUG
-        Logger::debug(str::format(
-          "panDXVK: BC→ASTC remap VkImage ",
-          m_desc.Width, "x", m_desc.Height, " ",
-          "DXGI_FORMAT=", m_desc.Format, " → ASTC_4x4"));
-#endif
+        // Functional marker, not a diagnostic: this is the only line in a
+        // tester log that proves the gate opened and a VkImage was remapped.
+        // Deliberately kept OUT of #ifndef NDEBUG so release builds still
+        // emit it, but gated on the runtime log level so the default build
+        // pays nothing - no string is built unless debug logging is on.
+        if (Logger::logLevel() >= LogLevel::Debug) {
+          Logger::debug(str::format(
+            "panDXVK: BC→ASTC remap VkImage ",
+            m_desc.Width, "x", m_desc.Height, " ",
+            "DXGI_FORMAT=", m_desc.Format, " → ASTC_4x4"));
+        }
         formatInfo.Format = astcFormat;
         formatFamily.FormatCount = 1;
         formatFamily.Formats[0] = astcFormat;

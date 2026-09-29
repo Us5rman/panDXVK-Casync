@@ -37,10 +37,14 @@ namespace dxvk {
         && util::isBcFormat(pDesc->Format)) {
       VkFormat astcFormat = util::bcToAstcFormat(pDesc->Format);
       if (astcFormat != VK_FORMAT_UNDEFINED) {
-#ifndef NDEBUG
-        Logger::debug(str::format(
-          "panDXVK: RTV BC→ASTC DXGI_FORMAT=", pDesc->Format));
-#endif
+        // Functional marker (see d3d11_texture.cpp): proof in a tester log
+        // that a render-target view was remapped. Kept out of
+        // #ifndef NDEBUG for the same reason; runtime-gated so the default
+        // build pays nothing.
+        if (Logger::logLevel() >= LogLevel::Debug) {
+          Logger::debug(str::format(
+            "panDXVK: RTV BC→ASTC DXGI_FORMAT=", pDesc->Format));
+        }
         viewInfo.format = astcFormat;
         viewInfo.aspect = imageFormatInfo(astcFormat)->aspectMask;
       }
