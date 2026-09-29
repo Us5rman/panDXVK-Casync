@@ -54,6 +54,13 @@ jobs:
       image: fedora:44
       options: --user root
     steps:
+      # actions/checkout falls back to downloading a plain tarball when git is
+      # absent, which leaves no .git directory - and meson's vcs_tag then has
+      # nothing to describe and silently falls back to the project version.
+      # Install git first so the checkout is a real clone with tags.
+      - name: Install git for checkout
+        run: dnf install -y git
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -105,6 +112,13 @@ jobs:
       image: fedora:44
       options: --user root
     steps:
+      # actions/checkout falls back to downloading a plain tarball when git is
+      # absent, which leaves no .git directory - and meson's vcs_tag then has
+      # nothing to describe and silently falls back to the project version.
+      # Install git first so the checkout is a real clone with tags.
+      - name: Install git for checkout
+        run: dnf install -y git
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
