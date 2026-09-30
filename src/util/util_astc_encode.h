@@ -624,14 +624,11 @@ namespace dxvk::util {
       }
     }
 
-    // Periodic stats dump (every 10000th image). The counter always runs so
-    // the interval stays honest; the dump itself is runtime-gated so a
-    // release build pays nothing beyond the increment unless it is being
-    // measured with DXVK_LOG_LEVEL=debug. Was #ifndef NDEBUG, which removed
-    // the numbers entirely under -Db_ndebug=true.
-    static uint32_t imageCount = 0;
-    if (++imageCount % 10000 == 0 && Logger::logLevel() >= LogLevel::Debug)
-      astcStats().dump();
+    // NOTE: the periodic astcStats() dump deliberately does NOT live here.
+    // encodeAstcImage4x4 has no production caller — the live path is
+    // transcodeBcBlocksToAstc() in util_bc_to_astc.h — so anything placed
+    // in this function is dead, gets eliminated with its string literal,
+    // and never prints. The dump is invoked from transcodeBcToAstc().
   }
 
 }

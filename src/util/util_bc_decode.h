@@ -253,8 +253,10 @@ namespace dxvk::util {
     }
 
     void dump() const {
-#ifndef NDEBUG
-      // Debug-gated by design: zero CPU cost in release builds.
+      // Caller-gated on Logger::logLevel() >= LogLevel::Debug (see
+      // transcodeBcToAstc), so this never runs in an ordinary session.
+      // Was inside #ifndef NDEBUG, which compiled it out of release builds
+      // entirely — including the counters below, so it printed zeros.
       Logger::debug(str::format("[panDXVK] BC7 decode stats: total=", totalBlocks));
       for (int i = 0; i < 8; i++) {
         if (modeCounts[i]) {
@@ -264,7 +266,6 @@ namespace dxvk::util {
       }
       if (unhandledBlocks)
         Logger::debug(str::format("  unhandled: ", unhandledBlocks, " blocks"));
-#endif
     }
   };
 
@@ -1088,11 +1089,9 @@ namespace dxvk::util {
           }
         }
 
-#ifndef NDEBUG
         bc7Stats().totalBlocks++;
         if (mode >= 0 && mode < 8)
           bc7Stats().modeCounts[mode]++;
-#endif
 
         if (mode == 6) {
           // Mode 6: 1 subset, RGBAP 7.7.7.7.1 endpoints, 16×4-bit indices
@@ -1604,9 +1603,7 @@ namespace dxvk::util {
 
         } else {
           // Unknown mode (should not happen with valid BC7 data)
-#ifndef NDEBUG
           bc7Stats().unhandledBlocks++;
-#endif
           for (int i = 0; i < 16; i++) {
             pixels[i * 4 + 0] = 255;
             pixels[i * 4 + 1] = 0;

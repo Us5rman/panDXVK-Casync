@@ -361,6 +361,27 @@ namespace dxvk::util {
           astcBlock, sizeof(astcBlock));
       }
     }
+
+    // Periodic stats dumps. This is the one function both callers reach —
+    // transcodeBcToAstc() (DXGI) and the VkFormat transcodeBcToAstcAlloc()
+    // both end here, whereas the VkFormat overload skips transcodeBcToAstc()
+    // entirely — so it is the only place that reports every transcode.
+    //
+    // Both dumps used to sit behind #ifndef NDEBUG, so -Db_ndebug=true
+    // compiled them out of the release build; the astcStats one also lived
+    // in encodeAstcImage4x4, which has no production caller at all, so it
+    // never ran in any build. The counters always run so the periods stay
+    // honest, while the prints are gated on the log level so an ordinary run
+    // pays only the increments.
+    if (bc == BcFormat::BC7) {
+      static uint32_t bc7CallCount = 0;
+      if (++bc7CallCount % 1000 == 0 && Logger::logLevel() >= LogLevel::Debug)
+        bc7Stats().dump();
+    }
+
+    static uint32_t astcCallCount = 0;
+    if (++astcCallCount % 10000 == 0 && Logger::logLevel() >= LogLevel::Debug)
+      astcStats().dump();
   }
 
 
@@ -373,16 +394,6 @@ namespace dxvk::util {
           uint8_t*       dstData,
           VkDeviceSize   dstRowPitch) {
     BcFormat bc = dxgiToBcFormat(bcFormat);
-
-#ifndef NDEBUG
-    // Debug-gated periodic stats dump (every 1000th call).
-    if (bc == BcFormat::BC7) {
-      static uint32_t callCount = 0;
-      if (++callCount % 1000 == 0) {
-        bc7Stats().dump();
-      }
-    }
-#endif
 
     const bool remapR =
       bcFormat == DXGI_FORMAT_BC4_SNORM || bcFormat == DXGI_FORMAT_BC5_SNORM;
