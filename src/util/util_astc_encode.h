@@ -18,13 +18,27 @@ namespace dxvk::util {
    * meaningful in a release build that is being measured. (Previously the
    * whole struct was behind #ifndef NDEBUG, which left -Db_ndebug=true
    * builds printing zeros — or nothing at all.)
+   *
+   * Two fields that used to be here were removed, because neither can ever
+   * be non-zero:
+   *
+   *   - baseOffBlocks (CEM 13, RGBA base+offset): this encoder only ever
+   *     writes CEM 12 — the block header sets bits[16:13] = 12 and no
+   *     other CEM is emitted — so there is no path that could count into it.
+   *
+   *   - maxWeightClamp: min/max are taken over the very same 16 pixels, so
+   *     every per-channel d lies in [0, range] and
+   *     t = dot(d, range) / |range|² lands in [0,1] by construction. Both
+   *     weight-clamp guards are therefore unreachable.
+   *
+   * A field that provably never moves is worse than no field at all: it
+   * reads as a measurement when it is a constant. Reintroduce one only
+   * alongside a code path that can actually reach it.
    */
   struct AstcEncodeStats {
     uint32_t totalBlocks    = 0;
     uint32_t uniformBlocks  = 0;
     uint32_t directBlocks   = 0;  // CEM 12 (RGBA direct)
-    uint32_t baseOffBlocks  = 0;  // CEM 13 (RGBA base+offset)
-    uint32_t maxWeightClamp = 0;
 
     void dump() const {
       // Logger::debug, not fprintf: the counters only matter when someone is
@@ -33,9 +47,7 @@ namespace dxvk::util {
       Logger::debug(str::format(
         "[panDXVK ASTC encode] total=", totalBlocks,
         " uniform=", uniformBlocks,
-        " direct=", directBlocks,
-        " baseOff=", baseOffBlocks,
-        " maxWeightClamp=", maxWeightClamp));
+        " direct=", directBlocks));
     }
   };
 
