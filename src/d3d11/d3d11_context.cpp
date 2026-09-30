@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstring>
 
 #include "d3d11_context.h"
@@ -3821,9 +3822,19 @@ namespace dxvk {
 
     if (pDstTexture->GetDataFormat() != packedFormat) {
       // Use the actual update extent (pDstBox subregion or full mip level)
-#ifndef NDEBUG
-      auto t0 = std::chrono::high_resolution_clock::now();
-#endif
+      //
+      // The timer is collected only when debug logging is on, so a release
+      // build pays one enum compare instead of two clock reads plus a heap
+      // string build and log I/O — yet can still be measured. This was
+      // previously inside #ifndef NDEBUG, which meant -Db_ndebug=true
+      // compiled the only per-upload transcode cost metric out entirely
+      // (8b04f8c already moved the four transcode markers out for this same
+      // reason; the timer was left behind).
+      const bool logTranscodeTiming = Logger::logLevel() >= LogLevel::Debug;
+
+      std::chrono::high_resolution_clock::time_point t0;
+      if (logTranscodeTiming)
+        t0 = std::chrono::high_resolution_clock::now();
 
       astcData = util::transcodeBcToAstcAlloc(
         packedFormat, static_cast<const uint8_t*>(pSrcData),
@@ -3848,20 +3859,16 @@ namespace dxvk {
         }
       }
 
-#ifndef NDEBUG
-      // Debug-gated by design: per-upload timing + logging is pure CPU
-      // overhead (chrono + heap string build + log I/O). Release builds
-      // skip it entirely since wrappers now carry the BCN layer and the
-      // transcode path is dormant behind the feature gate.
-      auto t1 = std::chrono::high_resolution_clock::now();
-      double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+      if (logTranscodeTiming) {
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-      Logger::debug(str::format(
-        "panDXVK: BC→ASTC transcode ",
-        extent.width, "x", extent.height, " ",
-        "DXGI_FORMAT=", packedFormat, " sub=", DstSubresource,
-        " ", ms, "ms"));
-#endif
+        Logger::debug(str::format(
+          "panDXVK: BC→ASTC transcode ",
+          extent.width, "x", extent.height, " ",
+          "DXGI_FORMAT=", packedFormat, " sub=", DstSubresource,
+          " ", ms, "ms"));
+      }
 
       // Override src data + format for the staging buffer path below.
       pSrcData = astcData.get();

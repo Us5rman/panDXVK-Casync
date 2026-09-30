@@ -6,10 +6,18 @@
 #include <cassert>
 #include <algorithm>
 
+#include "log/log.h"
+#include "util_string.h"
+
 namespace dxvk::util {
 
   /**
-   * \brief ASTC encoder statistics (debug builds only)
+   * \brief ASTC encoder statistics
+   *
+   * Counters are always live; only \ref dump() is gated, so the values are
+   * meaningful in a release build that is being measured. (Previously the
+   * whole struct was behind #ifndef NDEBUG, which left -Db_ndebug=true
+   * builds printing zeros — or nothing at all.)
    */
   struct AstcEncodeStats {
     uint32_t totalBlocks    = 0;
@@ -19,11 +27,15 @@ namespace dxvk::util {
     uint32_t maxWeightClamp = 0;
 
     void dump() const {
-#ifndef NDEBUG
-      fprintf(stderr,
-        "[panDXVK ASTC encode] total=%u uniform=%u direct=%u baseOff=%u maxWeightClamp=%u\n",
-        totalBlocks, uniformBlocks, directBlocks, baseOffBlocks, maxWeightClamp);
-#endif
+      // Logger::debug, not fprintf: the counters only matter when someone is
+      // reading the log, and the rest of the panDXVK markers go through
+      // Logger, so a single grep finds all of them.
+      Logger::debug(str::format(
+        "[panDXVK ASTC encode] total=", totalBlocks,
+        " uniform=", uniformBlocks,
+        " direct=", directBlocks,
+        " baseOff=", baseOffBlocks,
+        " maxWeightClamp=", maxWeightClamp));
     }
   };
 
@@ -478,17 +490,13 @@ namespace dxvk::util {
       maxA = std::max(maxA, pixels[i * 4 + 3]);
     }
 
-#ifndef NDEBUG
     astcStats().totalBlocks++;
-#endif
 
     // ─── Step 2: Check for uniform block ───────────────────────────
     bool uniform = (minR == maxR && minG == maxG && minB == maxB && minA == maxA);
 
     if (uniform) {
-#ifndef NDEBUG
       astcStats().uniformBlocks++;
-#endif
 
       writeBlockHeader(block);
       writeEndpoints(block, minR, minG, minB, minA, minR, minG, minB, minA);
@@ -504,9 +512,7 @@ namespace dxvk::util {
     // s1 = R1+G1+B1 >= s0 = R0+G0+B0 and Mode 12 never takes its
     // blue-contract branch (see astc_spec.txt Mode 12).
 
-#ifndef NDEBUG
     astcStats().directBlocks++;
-#endif
 
     writeBlockHeader(block);
     writeEndpoints(block, minR, minG, minB, minA, maxR, maxG, maxB, maxA);
@@ -606,12 +612,14 @@ namespace dxvk::util {
       }
     }
 
-#ifndef NDEBUG
-    // Log stats periodically (every 10000th image)
+    // Periodic stats dump (every 10000th image). The counter always runs so
+    // the interval stays honest; the dump itself is runtime-gated so a
+    // release build pays nothing beyond the increment unless it is being
+    // measured with DXVK_LOG_LEVEL=debug. Was #ifndef NDEBUG, which removed
+    // the numbers entirely under -Db_ndebug=true.
     static uint32_t imageCount = 0;
-    if (++imageCount % 10000 == 0)
+    if (++imageCount % 10000 == 0 && Logger::logLevel() >= LogLevel::Debug)
       astcStats().dump();
-#endif
   }
 
 }
