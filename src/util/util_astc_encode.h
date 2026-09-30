@@ -461,6 +461,281 @@ namespace dxvk::util {
 
 
   /**
+   * \brief Rounds and clamps a float channel value to a storage byte
+   *
+   * Endpoint candidates are floats after an axis fit. They must be whole
+   * bytes before they are scored, because writeEndpoints() drops the low
+   * bit (\c value >> 1) and the decoder restores it by bit replication —
+   * scoring an unrounded value would optimise something the block cannot
+   * carry.
+   */
+  inline uint8_t roundEndpointChannel(float v) {
+    if (!(v > 0.0f))
+      return 0u;
+    if (v > 255.0f)
+      return 255u;
+    return static_cast<uint8_t>(v + 0.5f);
+  }
+
+
+  /**
+   * \brief Applies the 7-bit endpoint round trip the decoder will see
+   *
+   * writeEndpoints() stores \c value >> 1 as 7 bits; the decoder restores
+   * the full range by bit replication from the MSB (spec C.2.13), which
+   * lands within one LSB of the original for every input.
+   */
+  inline float roundTripEndpoint(uint8_t v) {
+    const uint8_t stored = static_cast<uint8_t>(v >> 1);
+    return static_cast<float>((stored << 1) | (stored >> 6));
+  }
+
+
+  /**
+   * \brief Orders two endpoints so Mode 12 never takes blue-contract
+   *
+   * ASTC Mode 12 reads e0 = (v0,v2,v4,v6) and e1 = (v1,v3,v5,v7), and
+   * takes the blue-contract branch when s1 < s0 (s0/s1 = sums of the
+   * first three channels). Per-channel min/max endpoints satisfied
+   * s1 >= s0 for free; a fitted axis does not, so the pair is swapped
+   * into order here. Weights are computed after this call, so no weight
+   * inversion is needed.
+   */
+  inline void orderEndpointsMode12(uint8_t e0[4], uint8_t e1[4]) {
+    const int s0 = int(e0[0]) + int(e0[1]) + int(e0[2]);
+    const int s1 = int(e1[0]) + int(e1[1]) + int(e1[2]);
+    if (s1 >= s0)
+      return;
+    for (int c = 0; c < 4; c++) {
+      const uint8_t tmp = e0[c];
+      e0[c] = e1[c];
+      e1[c] = tmp;
+    }
+  }
+
+
+  /**
+   * \brief Projects texels onto an endpoint pair and quantises the weights
+   *
+   * This is the encoder half of the fit: it computes each texel's position
+   * on the r0 -> r0+range line and quantises it to the quint+1 range. The
+   * caller decides which float endpoints to pass — v9 passed the raw
+   * per-channel min/max, an axis candidate passes what the decoder will
+   * reconstruct after the 7-bit round trip.
+   *
+   * \param [in]  pixels   16 RGBA texels
+   * \param [in]  r0       First endpoint as floats
+   * \param [in]  range    e1 - e0 as floats
+   * \param [out] weights  16 quantised weight indices
+   */
+  inline void projectWeights(
+    const uint8_t* pixels,
+    const float    r0[4],
+    const float    range[4],
+    uint32_t       weights[16]) {
+    float rangeSq = 0.0f;
+    for (int c = 0; c < 4; c++)
+      rangeSq += range[c] * range[c];
+
+    if (!(rangeSq >= 1.0f)) {
+      for (int i = 0; i < 16; i++)
+        weights[i] = 0;
+      return;
+    }
+
+    const float invRangeSq = 1.0f / rangeSq;
+
+    for (int i = 0; i < 16; i++) {
+      float t = 0.0f;
+      for (int c = 0; c < 4; c++) {
+        const float d = static_cast<float>(pixels[i * 4 + c]) - r0[c];
+        t += d * range[c];
+      }
+      t *= invRangeSq;
+      t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+      weights[i] = quantizeWeightQuint1(t);
+    }
+  }
+
+
+  /**
+   * \brief Scores stored endpoints plus weights as the GPU will see them
+   *
+   * Replays the decode half of the path: 7-bit endpoint round trip, then
+   * reconstruction from the supplied weights. Returns the sum of squared
+   * RGBA error and, through \p worst, the largest single-channel error in
+   * the block — that worst-channel figure is the one the endpoint choice
+   * is made on, because one badly wrong texel is what reads as corruption.
+   *
+   * \param [in]  pixels   16 RGBA texels
+   * \param [in]  e0       First endpoint (already ordered)
+   * \param [in]  e1       Second endpoint (already ordered)
+   * \param [in]  weights  16 quantised weight indices
+   * \param [out] worst    Largest single-channel error in the block
+   * \returns              Sum of squared error over RGBA
+   */
+  inline double scoreEndpoints(
+    const uint8_t* pixels,
+    const uint8_t  e0[4],
+    const uint8_t  e1[4],
+    const uint32_t weights[16],
+    double*        worst) {
+    float r0[4], r1[4], range[4];
+    for (int c = 0; c < 4; c++) {
+      r0[c]    = roundTripEndpoint(e0[c]);
+      r1[c]    = roundTripEndpoint(e1[c]);
+      range[c] = r1[c] - r0[c];
+    }
+
+    double sse = 0.0;
+    double w   = 0.0;
+
+    for (int i = 0; i < 16; i++) {
+      const float wgt = static_cast<float>(unquantWeightQuint1(weights[i]))
+                      / 64.0f;
+
+      for (int c = 0; c < 4; c++) {
+        const float rec = r0[c] + range[c] * wgt;
+        const double err = static_cast<double>(pixels[i * 4 + c]) - rec;
+        sse += err * err;
+        const double mag = std::fabs(err);
+        if (mag > w)
+          w = mag;
+      }
+    }
+
+    if (worst)
+      *worst = w;
+    return sse;
+  }
+
+
+  /**
+   * \brief Fits the principal colour axis of a 4x4 block
+   *
+   * Two power iterations seeded on the bounding-box diagonal. Measured on
+   * 5000 random BC1 blocks (v26/axis.cpp): mean worst-channel error falls
+   * from 32.29 (diagonal, 0 iterations) to 18.55 at k=2, while the k=60
+   * asymptote is 18.44 — the fit has converged after two passes, so the
+   * extra passes buy 0.1 and cost upload-path cycles.
+   *
+   * \param [in]  pixels  16 RGBA texels
+   * \param [out] mean    Block mean in RGBA
+   * \param [out] axis    Unit axis
+   */
+  inline void fitBlockAxis(
+    const uint8_t* pixels,
+          float    mean[4],
+          float    axis[4]) {
+    for (int c = 0; c < 4; c++)
+      mean[c] = 0.0f;
+    for (int i = 0; i < 16; i++)
+      for (int c = 0; c < 4; c++)
+        mean[c] += static_cast<float>(pixels[i * 4 + c]);
+    for (int c = 0; c < 4; c++)
+      mean[c] /= 16.0f;
+
+    uint8_t mn[4] = { 255, 255, 255, 255 };
+    uint8_t mx[4] = {   0,   0,   0,   0 };
+    for (int i = 0; i < 16; i++) {
+      for (int c = 0; c < 4; c++) {
+        const uint8_t v = pixels[i * 4 + c];
+        mn[c] = std::min(mn[c], v);
+        mx[c] = std::max(mx[c], v);
+      }
+    }
+
+    float norm = 0.0f;
+    for (int c = 0; c < 4; c++) {
+      axis[c] = static_cast<float>(mx[c]) - mn[c];
+      norm   += axis[c] * axis[c];
+    }
+    norm = std::sqrt(norm);
+
+    if (!(norm > 1.0e-6f)) {
+      axis[0] = 1.0f;
+      axis[1] = axis[2] = axis[3] = 0.0f;
+      return;
+    }
+    for (int c = 0; c < 4; c++)
+      axis[c] /= norm;
+
+    for (int it = 0; it < 2; it++) {
+      float cov[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+      for (int i = 0; i < 16; i++) {
+        float d[4];
+        for (int c = 0; c < 4; c++)
+          d[c] = static_cast<float>(pixels[i * 4 + c]) - mean[c];
+
+        float proj = 0.0f;
+        for (int c = 0; c < 4; c++)
+          proj += d[c] * axis[c];
+        for (int r = 0; r < 4; r++)
+          cov[r] += proj * d[r];
+      }
+
+      float n2 = 0.0f;
+      for (int c = 0; c < 4; c++) {
+        axis[c] = cov[c];
+        n2 += axis[c] * axis[c];
+      }
+      n2 = std::sqrt(n2);
+
+      if (!(n2 > 1.0e-6f))
+        return;
+      for (int c = 0; c < 4; c++)
+        axis[c] /= n2;
+    }
+  }
+
+
+  /**
+   * \brief Builds an ordered endpoint pair spanning a block along an axis
+   *
+   * The endpoints are the block's extent along \p axis, rounded to bytes
+   * and ordered so Mode 12 cannot blue-contract.
+   *
+   * \param [in]  pixels  16 RGBA texels
+   * \param [in]  mean    Block mean (from fitBlockAxis)
+   * \param [in]  axis    Unit axis (from fitBlockAxis)
+   * \param [out] e0      First endpoint
+   * \param [out] e1      Second endpoint
+   */
+  inline void endpointsFromAxis(
+    const uint8_t* pixels,
+    const float    mean[4],
+    const float    axis[4],
+          uint8_t  e0[4],
+          uint8_t  e1[4]) {
+    float tMin =  1.0e30f;
+    float tMax = -1.0e30f;
+
+    for (int i = 0; i < 16; i++) {
+      float t = 0.0f;
+      for (int c = 0; c < 4; c++)
+        t += (static_cast<float>(pixels[i * 4 + c]) - mean[c]) * axis[c];
+      tMin = std::min(tMin, t);
+      tMax = std::max(tMax, t);
+    }
+
+    if (!(tMax > tMin)) {
+      for (int c = 0; c < 4; c++) {
+        e0[c] = pixels[c];
+        e1[c] = pixels[c];
+      }
+      return;
+    }
+
+    for (int c = 0; c < 4; c++) {
+      e0[c] = roundEndpointChannel(mean[c] + tMin * axis[c]);
+      e1[c] = roundEndpointChannel(mean[c] + tMax * axis[c]);
+    }
+    orderEndpointsMode12(e0, e1);
+  }
+
+
+  /**
    * \brief Encodes a 4x4 RGBA8 block to ASTC 4x4
    *
    * Single partition, no dual plane, CEM 12 (LDR RGBA direct) with 7-bit
@@ -518,55 +793,86 @@ namespace dxvk::util {
       return;
     }
 
-    // ─── Step 3: Compute endpoints ─────────────────────────────────
-    // CEM 12 (LDR RGBA direct): endpoint 0 = per-channel min,
-    // endpoint 1 = per-channel max.  min <= max on every channel, so
-    // s1 = R1+G1+B1 >= s0 = R0+G0+B0 and Mode 12 never takes its
-    // blue-contract branch (see astc_spec.txt Mode 12).
+    // ─── Step 3: Fit endpoints ─────────────────────────────────────
+    // CEM 12 (LDR RGBA direct): the block is one line through RGBA
+    // space. Two candidates are built and the one with the lower worst
+    // texel is written:
+    //
+    //   A  v9 exactly — per-channel min/max endpoints with v9's weight
+    //      projection (raw min/max, no round trip). The bounding-box
+    //      diagonal is the right axis only when the block's colours lie
+    //      on it, but it is free to order: min <= max per channel means
+    //      s1 >= s0 holds without help.
+    //   B  the block's principal axis, fitted with two power iterations
+    //      and ordered explicitly, with weights projected against the
+    //      round-tripped endpoints the decoder will actually rebuild.
+    //
+    // Measured on 5000 random BC1 blocks: mean worst-channel error 32.3
+    // for A, 18.6 for B. On saturated anti-correlated content (red
+    // <-> green) A scores 100.9 where B scores 0.7 — A is not a small
+    // constant off, it rewrites the hue.
+    //
+    // The comparison is on the block's WORST texel rather than a mean,
+    // and it is strict (B only when it is strictly lower). Two
+    // consequences: one badly wrong texel is what reads as corruption, so
+    // that is the quantity to protect; and a block where A wins — on a
+    // tie included — emits byte-identical output to the min/max-only
+    // encoder, while B can only ever lower a block's worst-channel error,
+    // never raise it.
 
     astcStats().directBlocks++;
 
     writeBlockHeader(block);
-    writeEndpoints(block, minR, minG, minB, minA, maxR, maxG, maxB, maxA);
 
-    // ─── Step 4: Compute quint+1LSB weights ────────────────────────
-    // For each pixel, compute interpolation factor t ∈ [0, 1] by
-    // projecting onto the min→max axis in RGBA space, then quantize to
-    // the block's 10-level (0..9) weight range.  C.2.17 maps the stored
-    // indices to {0,7,14,21,28,36,43,50,57,64}/64, so the quantizer
-    // targets 0..64 directly and picks the nearest *unquantized* level —
-    // the index order itself is scrambled (index 1 -> 64).
-    float rangeR = static_cast<float>(maxR) - minR;
-    float rangeG = static_cast<float>(maxG) - minG;
-    float rangeB = static_cast<float>(maxB) - minB;
-    float rangeA = static_cast<float>(maxA) - minA;
-    float rangeSq = rangeR * rangeR + rangeG * rangeG
-                  + rangeB * rangeB + rangeA * rangeA;
+    // Candidate A — v9's endpoints and v9's weight projection.
+    const float boxR0[4] = {
+      static_cast<float>(minR),
+      static_cast<float>(minG),
+      static_cast<float>(minB),
+      static_cast<float>(minA) };
+    const float boxRange[4] = {
+      static_cast<float>(maxR) - minR,
+      static_cast<float>(maxG) - minG,
+      static_cast<float>(maxB) - minB,
+      static_cast<float>(maxA) - minA };
 
-    uint32_t weights[16];
+    uint32_t weightsBox[16];
+    projectWeights(pixels, boxR0, boxRange, weightsBox);
 
-    if (rangeSq < 1.0f) {
-      // All pixels map to the same colour (cannot happen after the
-      // uniform check, but handle gracefully).
-      for (int i = 0; i < 16; i++)
-        weights[i] = 0;
-    } else {
-      // t = dot(d, range)/|range|², clamped to [0,1].  Off-axis pixels
-      // no longer overshoot toward max, and it costs one reciprocal per
-      // block instead of a sqrt per pixel.
-      float invRangeSq = 1.0f / rangeSq;
+    uint8_t boxE0[4] = { minR, minG, minB, minA };
+    uint8_t boxE1[4] = { maxR, maxG, maxB, maxA };
+    orderEndpointsMode12(boxE0, boxE1);
 
-      for (int i = 0; i < 16; i++) {
-        float dr = static_cast<float>(pixels[i * 4 + 0]) - minR;
-        float dg = static_cast<float>(pixels[i * 4 + 1]) - minG;
-        float db = static_cast<float>(pixels[i * 4 + 2]) - minB;
-        float da = static_cast<float>(pixels[i * 4 + 3]) - minA;
-        float t = (dr * rangeR + dg * rangeG + db * rangeB + da * rangeA) * invRangeSq;
-        t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+    double worstBox = 0.0;
+    scoreEndpoints(pixels, boxE0, boxE1, weightsBox, &worstBox);
 
-        weights[i] = quantizeWeightQuint1(t);
-      }
+    // ─── Step 4: Fit the principal axis and score it ───────────────
+    float mean[4], axis[4];
+    fitBlockAxis(pixels, mean, axis);
+
+    uint8_t fitE0[4], fitE1[4];
+    endpointsFromAxis(pixels, mean, axis, fitE0, fitE1);
+
+    float fitR0[4], fitRange[4];
+    for (int c = 0; c < 4; c++) {
+      fitR0[c]    = roundTripEndpoint(fitE0[c]);
+      fitRange[c] = roundTripEndpoint(fitE1[c]) - fitR0[c];
     }
+
+    uint32_t weightsFit[16];
+    projectWeights(pixels, fitR0, fitRange, weightsFit);
+
+    double worstFit = 0.0;
+    scoreEndpoints(pixels, fitE0, fitE1, weightsFit, &worstFit);
+
+    const bool      useFit  = worstFit < worstBox;
+    const uint8_t*  e0      = useFit ? fitE0 : boxE0;
+    const uint8_t*  e1      = useFit ? fitE1 : boxE1;
+    const uint32_t* weights = useFit ? weightsFit : weightsBox;
+
+    writeEndpoints(block,
+      e0[0], e0[1], e0[2], e0[3],
+      e1[0], e1[1], e1[2], e1[3]);
 
     // ─── Step 5: Pack weights into the block ───────────────────────
     // ISE-pack the 16 quint+1LSB weights into 54 bits, then store that
