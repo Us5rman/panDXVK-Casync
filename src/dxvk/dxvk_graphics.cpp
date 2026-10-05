@@ -2,6 +2,7 @@
 
 #include "dxvk_device.h"
 #include "dxvk_graphics.h"
+#include "dxvk_pipecompiler.h"
 #include "dxvk_pipemanager.h"
 #include "dxvk_spec_const.h"
 #include "dxvk_state_cache.h"
@@ -70,6 +71,12 @@ namespace dxvk {
       if (!this->validatePipelineState(state, true))
         return VK_NULL_HANDLE;
 
+      // Hand the pipeline to the async compiler and skip the draw
+      if (m_pipeMgr->m_compiler != nullptr) {
+        m_pipeMgr->m_compiler->queueCompilation(this, state, renderPass);
+        return VK_NULL_HANDLE;
+      }
+
       // Prevent other threads from adding new instances and check again
       std::lock_guard<dxvk::mutex> lock(m_mutex);
       instance = this->findInstance(state, renderPass);
@@ -99,6 +106,20 @@ namespace dxvk {
 
     if (!this->findInstance(state, renderPass))
       this->createInstance(state, renderPass);
+  }
+
+
+  void DxvkGraphicsPipeline::compilePipelineAsync(
+    const DxvkGraphicsPipelineStateInfo& state,
+    const DxvkRenderPass*                renderPass) {
+    std::lock_guard<dxvk::mutex> lock(m_mutex);
+
+    if (!this->findInstance(state, renderPass)) {
+      this->createInstance(state, renderPass);
+
+      if (m_pipeMgr->m_gplAsyncCache)
+        this->writePipelineStateToCache(state, renderPass->format());
+    }
   }
 
 
