@@ -18,18 +18,18 @@ namespace dxvk {
     /// when using the state cache
     int32_t numCompilerThreads;
 
-    /// Plain async: compile pipelines on
-    /// worker threads, skip the draw until ready
+    /// Compile graphics pipelines asynchronously
     bool enableAsync;
 
-    /// Gplasync mode
+    /// Compile graphics pipelines asynchronously
+    /// using graphics pipeline libraries
     bool enableGplAsync;
 
-    /// Dyasync mode
+    /// Compile graphics pipelines asynchronously
+    /// with dynamic state
     bool enableDyAsync;
 
-    /// Worker threads for async compiles,
-    /// 0 picks a count automatically
+    /// Number of async compiler threads
     int32_t numAsyncThreads;
 
     /// Shader-related options
