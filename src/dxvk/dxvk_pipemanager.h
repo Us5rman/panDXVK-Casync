@@ -1,11 +1,12 @@
-
 #pragma once
 
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 
 #include "dxvk_compute.h"
 #include "dxvk_graphics.h"
+#include "dxvk_pipecompiler.h"
 
 namespace dxvk {
 
@@ -103,6 +104,8 @@ namespace dxvk {
 
     std::atomic<uint32_t>     m_numComputePipelines  = { 0 };
     std::atomic<uint32_t>     m_numGraphicsPipelines = { 0 };
+
+    bool                      m_gplAsyncCache = false;
     
     dxvk::mutex m_mutex;
     
@@ -115,6 +118,8 @@ namespace dxvk {
       DxvkGraphicsPipelineShaders,
       DxvkGraphicsPipeline,
       DxvkHash, DxvkEq> m_graphicsPipelines;
+
+    std::unique_ptr<DxvkPipelineCompiler> m_compiler;
     
   };
   
