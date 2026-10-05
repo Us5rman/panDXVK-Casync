@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "dxvk_device.h"
 #include "dxvk_pipemanager.h"
 #include "dxvk_state_cache.h"
@@ -9,15 +11,30 @@ namespace dxvk {
           DxvkRenderPassPool* passManager)
   : m_device    (device),
     m_cache     (new DxvkPipelineCache(device->vkd())) {
+    const DxvkOptions& options = device->config();
+
+    if (options.enableAsync || options.enableGplAsync) {
+      int32_t numThreads = options.numAsyncThreads;
+
+      if (numThreads <= 0) {
+        numThreads = int32_t(dxvk::thread::hardware_concurrency()) / 2;
+        numThreads = std::clamp(numThreads, 1, 8);
+      }
+
+      m_gplAsyncCache = options.enableGplAsync;
+      m_compiler = std::make_unique<DxvkPipelineCompiler>(uint32_t(numThreads));
+    }
+
     std::string useStateCache = env::getEnvVar("DXVK_STATE_CACHE");
     
-    if (useStateCache != "0" && device->config().enableStateCache)
+    if (useStateCache != "0" && options.enableStateCache)
       m_stateCache = new DxvkStateCache(device, this, passManager);
   }
   
   
   DxvkPipelineManager::~DxvkPipelineManager() {
-    
+    if (m_compiler != nullptr)
+      m_compiler->stopWorkerThreads();
   }
   
   
@@ -75,14 +92,17 @@ namespace dxvk {
 
 
   bool DxvkPipelineManager::isCompilingShaders() const {
-    return m_stateCache != nullptr
-        && m_stateCache->isCompilingShaders();
+    return (m_stateCache != nullptr && m_stateCache->isCompilingShaders())
+        || (m_compiler != nullptr && m_compiler->isBusy());
   }
 
 
   void DxvkPipelineManager::stopWorkerThreads() const {
     if (m_stateCache != nullptr)
       m_stateCache->stopWorkerThreads();
+
+    if (m_compiler != nullptr)
+      m_compiler->stopWorkerThreads();
   }
   
 }
