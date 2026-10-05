@@ -13,6 +13,9 @@ namespace dxvk {
     m_cache     (new DxvkPipelineCache(device->vkd())) {
     const DxvkOptions& options = device->config();
 
+    Logger::info(str::format("panDXVK: async=", options.enableAsync,
+      " gplasync=", options.enableGplAsync));
+
     if (options.enableAsync || options.enableGplAsync) {
       int32_t numThreads = options.numAsyncThreads;
 
