@@ -216,6 +216,18 @@ namespace dxvk {
     void compilePipeline(
       const DxvkGraphicsPipelineStateInfo&    state,
       const DxvkRenderPass*                   renderPass);
+
+    /**
+     * \brief Compiles a pipeline for the async compiler
+     *
+     * Stores the result for future use and, if
+     * enabled, writes the state to the cache.
+     * \param [in] state Pipeline state vector
+     * \param [in] renderPass The render pass
+     */
+    void compilePipelineAsync(
+      const DxvkGraphicsPipelineStateInfo&    state,
+      const DxvkRenderPass*                   renderPass);
     
   private:
     
