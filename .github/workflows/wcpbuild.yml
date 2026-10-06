@@ -112,28 +112,17 @@ jobs:
             ]
           }
           JSONEOF
-          tar --zstd -cf "../pandxvk-${{ steps.version.outputs.version_name }}.wcp" \
-            system32/ syswow64/ profile.json
-
-      - name: Wrap WCP in zip
-        run: |
-          python3 -c "
-          import zipfile, glob
-          wcp_files = glob.glob('*.wcp')
-          if not wcp_files:
-              raise SystemExit('ERROR: No .wcp files found in $GITHUB_WORKSPACE')
-          print(f'Packing {len(wcp_files)} file(s): {wcp_files}')
-          with zipfile.ZipFile('wcp.zip', 'w', zipfile.ZIP_STORED) as zf:
-              for f in wcp_files:
-                  zf.write(f)
-          "
-          ls -lh wcp.zip
+          tar -cf ../pandxvk.tar system32/ syswow64/ profile.json
+          zstd --ultra -22 -f ../pandxvk.tar -o "../pandxvk-${{ steps.version.outputs.version_name }}.wcp"
+          rm ../pandxvk.tar
+          ls -l ../pandxvk-*.wcp
 
       - name: Upload WCP
         uses: actions/upload-artifact@v4
         with:
           name: wcp-pandxvk-${{ steps.version.outputs.version_name }}-${{ steps.get-sha.outputs.sha }}
-          path: ./wcp.zip
+          path: ./pandxvk-${{ steps.version.outputs.version_name }}.wcp
+          compression-level: 0
 
       - name: Upload panDXVK config
         uses: actions/upload-artifact@v4
