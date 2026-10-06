@@ -23,7 +23,7 @@ namespace dxvk {
 
   public:
 
-    DxvkPipelineCompiler(uint32_t numThreads);
+    DxvkPipelineCompiler(uint32_t numThreads, bool enableLog);
 
     ~DxvkPipelineCompiler();
 
@@ -59,6 +59,16 @@ namespace dxvk {
       const DxvkRenderPass*          renderPass;
       DxvkGraphicsPipelineStateInfo  state;
       bool                           started;
+      uint32_t                       skippedDraws;
+    };
+
+    struct Stats {
+      uint32_t queued    = 0;
+      uint32_t finished  = 0;
+      uint32_t failed    = 0;
+      uint32_t repeated  = 0;
+      uint32_t peakQueue = 0;
+      double   totalMs   = 0.0;
     };
 
     mutable dxvk::mutex       m_mutex;
@@ -67,9 +77,11 @@ namespace dxvk {
     std::list<Entry>          m_entries;
     std::vector<dxvk::thread> m_workers;
 
+    Stats                     m_stats;
+    bool                      m_log  = false;
     bool                      m_stop = false;
 
-    void runWorker();
+    void runWorker(uint32_t index);
 
   };
 
