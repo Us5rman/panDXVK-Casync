@@ -25,7 +25,20 @@ namespace dxvk {
       }
 
       m_gplAsyncCache = options.enableGplAsync;
-      m_compiler = std::make_unique<DxvkPipelineCompiler>(uint32_t(numThreads));
+      m_asyncLog = options.enableAsyncLog;
+      m_compiler = std::make_unique<DxvkPipelineCompiler>(uint32_t(numThreads), m_asyncLog);
+
+      if (m_asyncLog) {
+        bool cacheOn = options.enableStateCache
+          && env::getEnvVar("DXVK_STATE_CACHE") != "0";
+
+        Logger::info(str::format("panDXVK async: logging on, mode=",
+          options.enableGplAsync ? "gplasync" : "async",
+          ", worker threads=", numThreads,
+          ", state cache=", cacheOn ? "on" : "off"));
+      }
+    } else if (options.enableAsyncLog) {
+      Logger::info("panDXVK async: PANDXVK_ASYNC_LOG is set but no async mode is enabled");
     }
 
     std::string useStateCache = env::getEnvVar("DXVK_STATE_CACHE");
