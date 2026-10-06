@@ -810,6 +810,31 @@ namespace dxvk {
     }
 
     m_vki->vkGetPhysicalDeviceFeatures2(m_handle, &m_deviceFeatures.core);
+
+    if (m_deviceExtensions.supports(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME)) {
+      VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT gplFeatures = { };
+      gplFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT;
+
+      VkPhysicalDeviceFeatures2 features = { };
+      features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      features.pNext = &gplFeatures;
+      m_vki->vkGetPhysicalDeviceFeatures2(m_handle, &features);
+
+      VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT gplProps = { };
+      gplProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT;
+
+      VkPhysicalDeviceProperties2 props = { };
+      props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      props.pNext = &gplProps;
+      m_vki->vkGetPhysicalDeviceProperties2(m_handle, &props);
+
+      Logger::info(str::format("Graphics pipeline library: feature=",
+        gplFeatures.graphicsPipelineLibrary, ", fast linking=",
+        gplProps.graphicsPipelineLibraryFastLinking, ", independent interpolation=",
+        gplProps.graphicsPipelineLibraryIndependentInterpolationDecoration));
+    } else {
+      Logger::info("Graphics pipeline library: not exposed");
+    }
   }
 
 
