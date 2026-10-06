@@ -5,7 +5,7 @@ set -e
 shopt -s extglob
 
 if [ -z "$1" ] || [ -z "$2" ]; then
-  echo "Usage: $0 version destdir [--no-package] [--dev-build]"
+  echo "Usage: $0 version destdir [--no-package] [--dev-build] [--diagnostics]"
   exit 1
 fi
 
@@ -27,6 +27,12 @@ opt_buildid=false
 opt_64only=0
 opt_32only=0
 
+# NDEBUG is forced on for every release package so that debug-only
+# instrumentation (for example the bind telemetry in dxvk_cmdlist) is
+# compiled out. --diagnostics clears it to produce a build that can emit
+# those counters while staying otherwise identical to a release build.
+opt_ndebug=true
+
 crossfile="build-win"
 
 while [ $# -gt 0 ]; do
@@ -37,6 +43,9 @@ while [ $# -gt 0 ]; do
   "--dev-build")
     opt_nopackage=1
     opt_devbuild=1
+    ;;
+  "--diagnostics")
+    opt_ndebug=false
     ;;
   "--build-id")
     opt_buildid=true
@@ -67,7 +76,7 @@ function build_arch {
 
     meson --cross-file "$DXVK_SRC_DIR/$crossfile$1.txt" \
           --buildtype "release"                         \
-          -Db_ndebug=true                               \
+          -Db_ndebug=$opt_ndebug                        \
           --prefix "$DXVK_BUILD_DIR"                    \
           $opt_strip                                    \
           --bindir "x$1"                                \
