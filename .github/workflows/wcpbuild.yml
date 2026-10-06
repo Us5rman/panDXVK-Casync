@@ -13,9 +13,9 @@ permissions:
   actions: read
 
 env:
-  VERSION_NAME: panDXVK 1.10.3 Casync
+  VERSION_NAME: Casync
   VERSION_CODE: 1
-  FILE_BASE: pandxvk-1.10.3-casync
+  FILE_BASE: Casync
 
 jobs:
   build:
