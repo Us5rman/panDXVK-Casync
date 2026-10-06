@@ -141,9 +141,7 @@ namespace dxvk {
   
   
   void DxvkCommandList::beginRecording() {
-#ifndef NDEBUG
     m_dbgBinds.clear();
-#endif
     VkCommandBufferBeginInfo info;
     info.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     info.pNext            = nullptr;
@@ -174,9 +172,11 @@ namespace dxvk {
      || m_vkd->vkEndCommandBuffer(m_sdmaBuffer) != VK_SUCCESS)
       Logger::err("DxvkCommandList::endRecording: Failed to record command buffer");
 
-#ifndef NDEBUG
-    // Debug-only bind telemetry. Emitted here rather than from
-    // cmdBindPipeline so that no logging ever sits in a per-bind path.
+    // Bind telemetry. Emitted here rather than from cmdBindPipeline so that
+    // no logging ever sits in a per-bind path. Gated at runtime rather than
+    // on NDEBUG, following bank Session 23 (8b04f8cc): evidence meant to
+    // reach a shipped log is gated on Logger::logLevel(), not compiled out,
+    // because NDEBUG-gating loses it from exactly the build that runs.
     // "skippable" is an upper bound: it counts back-to-back repeats of the
     // same (bindPoint, pipeline) pair, which is the only thing a
     // last-bound-pipeline cache could drop, and it does not model the cache
@@ -202,7 +202,6 @@ namespace dxvk {
     }
 
     m_dbgBinds.clear();
-#endif
   }
   
   

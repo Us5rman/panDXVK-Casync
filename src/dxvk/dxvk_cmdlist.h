@@ -346,14 +346,13 @@ namespace dxvk {
             VkPipeline              pipeline) {
       m_vkd->vkCmdBindPipeline(m_execBuffer,
         pipelineBindPoint, pipeline);
-#ifndef NDEBUG
-      // Debug-only bind telemetry. Records (bindPoint, pipeline) so that
-      // endRecording() can report how many binds a last-bound-pipeline cache
-      // would have suppressed. Never compiled into a release build, and
-      // skipped entirely unless debug logging was requested at startup.
+      // Bind telemetry: records (bindPoint, pipeline) so that endRecording()
+      // can report how many binds a last-bound-pipeline cache would have
+      // suppressed. Gated at runtime rather than on NDEBUG, so a stock
+      // release build can carry it; at the default log level this is one
+      // comparison and nothing else, and the vector is never touched.
       if (Logger::logLevel() <= LogLevel::Debug)
         m_dbgBinds.push_back(std::make_pair(pipelineBindPoint, pipeline));
-#endif
     }
 
 
@@ -828,12 +827,14 @@ namespace dxvk {
     std::vector<DxvkFenceValuePair> m_waitSemaphores;
     std::vector<DxvkFenceValuePair> m_signalSemaphores;
 
-#ifndef NDEBUG
-    // Debug-only: every pipeline bind issued through cmdBindPipeline while
-    // recording the current command list. Consumed and cleared by
-    // endRecording() to report bind redundancy. Not present in release builds.
+    // Every pipeline bind issued through cmdBindPipeline while recording the
+    // current command list. Consumed and cleared by endRecording() to report
+    // bind redundancy. Populated only when debug logging is enabled, so this
+    // stays empty in a release build at the default log level. Deliberately
+    // not compiled out under NDEBUG: bank Session 23 (8b04f8cc) established
+    // that evidence meant to reach a shipped log is gated at runtime instead,
+    // because NDEBUG-gating it silently loses it from the build that runs.
     std::vector<std::pair<VkPipelineBindPoint, VkPipeline>> m_dbgBinds;
-#endif
 
     VkCommandBuffer getCmdBuffer(DxvkCmdBuffer cmdBuffer) const {
       if (cmdBuffer == DxvkCmdBuffer::ExecBuffer) return m_execBuffer;
