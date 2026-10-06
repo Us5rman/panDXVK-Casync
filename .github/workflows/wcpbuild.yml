@@ -46,20 +46,40 @@ jobs:
           fi
           echo "version_code=$VCODE" >> "$GITHUB_OUTPUT"
 
-      - name: Get latest build SHA and run ID
+      - name: Get build SHA and run ID for this commit
         id: get-sha
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RUN_JSON=$(gh run list --repo ${{ github.repository }} --workflow build.yml --branch main \
-            --status success --limit 1 --json headSha,databaseId)
-          if [ -z "$RUN_JSON" ] || [ "$RUN_JSON" = "[]" ]; then
-            echo "::error::No successful build.yml runs found on branch main."
-            echo "::error::Trigger a Build DXVK (x64 + x32) workflow first."
+          # Resolve against THIS commit, not "the latest successful run".
+          # Picking the newest build.yml run means a WCP dispatched on commit X
+          # can silently package commit Y's DLLs, and it fails outright when
+          # that run's artifacts have been purged (seen 2026-10-06: the newest
+          # run was 51bb8827, whose artifacts had been deleted with it).
+          TARGET="${{ github.sha }}"
+          RUNS=$(gh run list --repo ${{ github.repository }} --workflow build.yml --branch main \
+            --status success --limit 20 --json headSha,databaseId)
+          MATCH=$(printf '%s' "$RUNS" | python3 -c '
+          import sys, json
+          target = sys.argv[1]
+          for r in json.load(sys.stdin):
+              if r["headSha"] == target:
+                  print(r["headSha"], r["databaseId"])
+                  break
+          ' "$TARGET")
+          if [ -z "$MATCH" ]; then
+            echo "::error::No successful build.yml run found for commit ${TARGET:0:7}."
+            echo "::error::Trigger Build DXVK (x64 + x32) on this commit first."
             exit 1
           fi
-          FULL_SHA=$(echo "$RUN_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['headSha'])")
-          RUN_ID=$(echo "$RUN_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['databaseId'])")
+          FULL_SHA=$(printf '%s' "$MATCH" | cut -d' ' -f1)
+          RUN_ID=$(printf '%s' "$MATCH" | cut -d' ' -f2)
+          COUNT=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/artifacts" --jq '.total_count')
+          if [ "$COUNT" = "0" ]; then
+            echo "::error::Build run for ${TARGET:0:7} has no artifacts (purged or expired)."
+            echo "::error::Re-run Build DXVK (x64 + x32) on this commit."
+            exit 1
+          fi
           echo "full_sha=$FULL_SHA" >> "$GITHUB_OUTPUT"
           echo "sha=${FULL_SHA:0:7}" >> "$GITHUB_OUTPUT"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
