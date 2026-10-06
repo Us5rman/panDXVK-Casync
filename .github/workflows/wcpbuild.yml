@@ -4,18 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       release_description:
-        description: 'Short description for profile.json (spaces become hyphens)'
+        description: 'Short description for profile.json'
         required: false
         type: string
-        default: 'Casync-panDXVK-fork-for-PanVK-Mali'
+        default: 'panDXVK - DXVK fork for PanVK/Mali-G720'
 
 permissions:
   actions: read
 
 env:
-  VERSION_NAME: Casync
+  VERSION_NAME: panDXVK 1.10.3 Casync
   VERSION_CODE: 1
-  FILE_BASE: Casync
+  FILE_BASE: pandxvk-1.10.3-casync
 
 jobs:
   build:
@@ -84,43 +84,34 @@ jobs:
           mv x32 syswow64
 
       - name: Package WCP
-        env:
-          RELEASE_DESC: ${{ inputs.release_description }}
         run: |
           cd ./workdir
-          python3 - <<'PY'
-          import json, os
-
-          desc = '-'.join(os.environ['RELEASE_DESC'].replace('/', ' ').split())
-          if not desc:
-              desc = 'Casync-panDXVK'
-
-          dlls = ['d3d9', 'd3d10', 'd3d10_1', 'd3d10core', 'd3d11', 'dxgi']
-          files = []
-          for folder, var in (('system32', '${system32}'), ('syswow64', '${syswow64}')):
-              for name in dlls:
-                  files.append({
-                      'source': folder + '/' + name + '.dll',
-                      'target': var + '/' + name + '.dll',
-                  })
-
-          profile = {
-              'type': 'DXVK',
-              'versionName': os.environ['VERSION_NAME'],
-              'versionCode': int(os.environ['VERSION_CODE']),
-              'description': desc,
-              'files': files,
+          cat > profile.json << 'JSONEOF'
+          {
+            "type": "DXVK",
+            "versionName": "${{ env.VERSION_NAME }}",
+            "versionCode": ${{ env.VERSION_CODE }},
+            "description": "${{ inputs.release_description }}",
+            "files": [
+              {"source": "system32/d3d9.dll",      "target": "${system32}/d3d9.dll"},
+              {"source": "system32/d3d10.dll",     "target": "${system32}/d3d10.dll"},
+              {"source": "system32/d3d10_1.dll",   "target": "${system32}/d3d10_1.dll"},
+              {"source": "system32/d3d10core.dll", "target": "${system32}/d3d10core.dll"},
+              {"source": "system32/d3d11.dll",     "target": "${system32}/d3d11.dll"},
+              {"source": "system32/dxgi.dll",      "target": "${system32}/dxgi.dll"},
+              {"source": "syswow64/d3d9.dll",      "target": "${syswow64}/d3d9.dll"},
+              {"source": "syswow64/d3d10.dll",     "target": "${syswow64}/d3d10.dll"},
+              {"source": "syswow64/d3d10_1.dll",   "target": "${syswow64}/d3d10_1.dll"},
+              {"source": "syswow64/d3d10core.dll", "target": "${syswow64}/d3d10core.dll"},
+              {"source": "syswow64/d3d11.dll",     "target": "${syswow64}/d3d11.dll"},
+              {"source": "syswow64/dxgi.dll",      "target": "${syswow64}/dxgi.dll"}
+            ]
           }
-
-          with open('profile.json', 'w') as f:
-              json.dump(profile, f, indent=2)
-          PY
-
-          cat profile.json
+          JSONEOF
           tar -cf ../pandxvk.tar system32/ syswow64/ profile.json
-          zstd -7 -f ../pandxvk.tar -o "../${FILE_BASE}.wcp"
+          zstd --ultra -7 -f ../pandxvk.tar -o "../${{ env.FILE_BASE }}.wcp"
           rm ../pandxvk.tar
-          ls -l "../${FILE_BASE}.wcp"
+          ls -l ../pandxvk-*.wcp
 
       - name: Upload WCP
         uses: actions/upload-artifact@v4
@@ -128,3 +119,10 @@ jobs:
           name: wcp-${{ env.FILE_BASE }}-${{ steps.get-sha.outputs.sha }}
           path: ./${{ env.FILE_BASE }}.wcp
           compression-level: 0
+
+      - name: Upload panDXVK config
+        uses: actions/upload-artifact@v4
+        with:
+          name: pandxvk-config-${{ env.FILE_BASE }}-${{ steps.get-sha.outputs.sha }}
+          path: pandxvk/
+          
