@@ -19,9 +19,10 @@ namespace dxvk {
     shrinkNvidiaHvvHeap   = config.getOption<Tristate>("dxvk.shrinkNvidiaHvvHeap",    Tristate::Auto);
     hud                   = config.getOption<std::string>("dxvk.hud", "");
 
-    enableAsync    = getFlag("PANDXVK_ASYNC",    config.getOption<bool>("dxvk.enableAsync",    false));
-    enableGplAsync = getFlag("PANDXVK_GPLASYNC", config.getOption<bool>("dxvk.enableGplAsync", false));
-    enableDyAsync  = getFlag("PANDXVK_DYASYNC",  config.getOption<bool>("dxvk.enableDyAsync",  false));
+    enableAsync    = getFlag("PANDXVK_ASYNC",     config.getOption<bool>("dxvk.enableAsync",    false));
+    enableGplAsync = getFlag("PANDXVK_GPLASYNC",  config.getOption<bool>("dxvk.enableGplAsync", false));
+    enableDyAsync  = getFlag("PANDXVK_DYASYNC",   config.getOption<bool>("dxvk.enableDyAsync",  false));
+    enableAsyncLog = getFlag("PANDXVK_ASYNC_LOG", config.getOption<bool>("dxvk.asyncLog",       false));
   }
 
 }
