@@ -3,16 +3,6 @@ name: WCP Build
 on:
   workflow_dispatch:
     inputs:
-      version_name:
-        description: 'Version number, e.g. 1.10.3.0 (will become pandxvk-1.10.3.0-<sha> in profile.json)'
-        required: true
-        type: string
-        default: '1.10.3'
-      version_code:
-        description: 'Build number (auto if blank)'
-        required: false
-        type: string
-        default: ''
       release_description:
         description: 'Short description for profile.json'
         required: false
@@ -21,6 +11,11 @@ on:
 
 permissions:
   actions: read
+
+env:
+  VERSION_NAME: panDXVK 1.10.3 Casync
+  VERSION_CODE: 1
+  FILE_BASE: pandxvk-1.10.3-casync
 
 jobs:
   build:
@@ -32,19 +27,6 @@ jobs:
 
       - name: Install zstd
         run: sudo apt-get update -y && sudo apt-get install -y zstd
-
-      - name: Resolve version inputs
-        id: version
-        run: |
-          VNAME="${{ inputs.version_name }}"
-          echo "version_name=$VNAME" >> "$GITHUB_OUTPUT"
-
-          # Auto versionCode if not provided: use timestamp
-          VCODE="${{ inputs.version_code }}"
-          if [ -z "$VCODE" ]; then
-            VCODE=$(date +%s)
-          fi
-          echo "version_code=$VCODE" >> "$GITHUB_OUTPUT"
 
       - name: Get build SHA and run ID for this commit
         id: get-sha
@@ -113,8 +95,8 @@ jobs:
           cat > profile.json << 'JSONEOF'
           {
             "type": "DXVK",
-            "versionName": "pandxvk-${{ steps.version.outputs.version_name }}",
-            "versionCode": ${{ steps.version.outputs.version_code }},
+            "versionName": "${{ env.VERSION_NAME }}",
+            "versionCode": ${{ env.VERSION_CODE }},
             "description": "${{ inputs.release_description }}",
             "files": [
               {"source": "system32/d3d9.dll",      "target": "${system32}/d3d9.dll"},
@@ -133,19 +115,20 @@ jobs:
           }
           JSONEOF
           tar -cf ../pandxvk.tar system32/ syswow64/ profile.json
-          zstd --ultra -7 -f ../pandxvk.tar -o "../pandxvk-${{ steps.version.outputs.version_name }}.wcp"
+          zstd --ultra -7 -f ../pandxvk.tar -o "../${{ env.FILE_BASE }}.wcp"
           rm ../pandxvk.tar
           ls -l ../pandxvk-*.wcp
 
       - name: Upload WCP
         uses: actions/upload-artifact@v4
         with:
-          name: wcp-pandxvk-${{ steps.version.outputs.version_name }}-${{ steps.get-sha.outputs.sha }}
-          path: ./pandxvk-${{ steps.version.outputs.version_name }}.wcp
+          name: wcp-${{ env.FILE_BASE }}-${{ steps.get-sha.outputs.sha }}
+          path: ./${{ env.FILE_BASE }}.wcp
           compression-level: 0
 
       - name: Upload panDXVK config
         uses: actions/upload-artifact@v4
         with:
-          name: pandxvk-config-${{ steps.version.outputs.version_name }}-${{ steps.get-sha.outputs.sha }}
+          name: pandxvk-config-${{ env.FILE_BASE }}-${{ steps.get-sha.outputs.sha }}
           path: pandxvk/
+          
