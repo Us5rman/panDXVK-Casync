@@ -1,6 +1,8 @@
 #include "dxvk_cmdlist.h"
 #include "dxvk_device.h"
 
+#include <algorithm>
+
 namespace dxvk {
     
   DxvkCommandList::DxvkCommandList(DxvkDevice* device)
@@ -139,6 +141,9 @@ namespace dxvk {
   
   
   void DxvkCommandList::beginRecording() {
+#ifndef NDEBUG
+    m_dbgBinds.clear();
+#endif
     VkCommandBufferBeginInfo info;
     info.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     info.pNext            = nullptr;
@@ -168,6 +173,36 @@ namespace dxvk {
      || m_vkd->vkEndCommandBuffer(m_initBuffer) != VK_SUCCESS
      || m_vkd->vkEndCommandBuffer(m_sdmaBuffer) != VK_SUCCESS)
       Logger::err("DxvkCommandList::endRecording: Failed to record command buffer");
+
+#ifndef NDEBUG
+    // Debug-only bind telemetry. Emitted here rather than from
+    // cmdBindPipeline so that no logging ever sits in a per-bind path.
+    // "skippable" is an upper bound: it counts back-to-back repeats of the
+    // same (bindPoint, pipeline) pair, which is the only thing a
+    // last-bound-pipeline cache could drop, and it does not model the cache
+    // invalidation such a cache would need on render pass spill, flush,
+    // pipeline unbind or command list boundaries.
+    if (!m_dbgBinds.empty() && Logger::logLevel() <= LogLevel::Debug) {
+      std::vector<std::pair<VkPipelineBindPoint, VkPipeline>> sorted = m_dbgBinds;
+      std::sort(sorted.begin(), sorted.end());
+
+      const uint64_t distinct = uint64_t(std::distance(sorted.begin(),
+        std::unique(sorted.begin(), sorted.end())));
+
+      uint64_t skippable = 0;
+      for (size_t i = 1; i < m_dbgBinds.size(); i++) {
+        if (m_dbgBinds[i] == m_dbgBinds[i - 1])
+          skippable += 1;
+      }
+
+      Logger::debug(str::format(
+        "dxvk bind stats: total=", uint64_t(m_dbgBinds.size()),
+        " distinct=", distinct,
+        " skippable=", skippable));
+    }
+
+    m_dbgBinds.clear();
+#endif
   }
   
   

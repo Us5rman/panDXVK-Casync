@@ -1,6 +1,7 @@
 #pragma once
 
 #include <limits>
+#include <utility>
 
 #include "dxvk_bind_mask.h"
 #include "dxvk_buffer.h"
@@ -345,6 +346,14 @@ namespace dxvk {
             VkPipeline              pipeline) {
       m_vkd->vkCmdBindPipeline(m_execBuffer,
         pipelineBindPoint, pipeline);
+#ifndef NDEBUG
+      // Debug-only bind telemetry. Records (bindPoint, pipeline) so that
+      // endRecording() can report how many binds a last-bound-pipeline cache
+      // would have suppressed. Never compiled into a release build, and
+      // skipped entirely unless debug logging was requested at startup.
+      if (Logger::logLevel() <= LogLevel::Debug)
+        m_dbgBinds.push_back(std::make_pair(pipelineBindPoint, pipeline));
+#endif
     }
 
 
@@ -818,6 +827,13 @@ namespace dxvk {
 
     std::vector<DxvkFenceValuePair> m_waitSemaphores;
     std::vector<DxvkFenceValuePair> m_signalSemaphores;
+
+#ifndef NDEBUG
+    // Debug-only: every pipeline bind issued through cmdBindPipeline while
+    // recording the current command list. Consumed and cleared by
+    // endRecording() to report bind redundancy. Not present in release builds.
+    std::vector<std::pair<VkPipelineBindPoint, VkPipeline>> m_dbgBinds;
+#endif
 
     VkCommandBuffer getCmdBuffer(DxvkCmdBuffer cmdBuffer) const {
       if (cmdBuffer == DxvkCmdBuffer::ExecBuffer) return m_execBuffer;
