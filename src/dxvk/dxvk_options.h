@@ -32,6 +32,9 @@ namespace dxvk {
     /// Number of async compiler threads
     int32_t numAsyncThreads;
 
+    /// Log async compilation activity
+    bool enableAsyncLog;
+
     /// Shader-related options
     Tristate useRawSsbo;
 
