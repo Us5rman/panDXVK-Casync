@@ -1,3 +1,5 @@
+#include <atomic>
+
 #include "../util/util_time.h"
 
 #include "dxvk_device.h"
@@ -68,8 +70,18 @@ namespace dxvk {
 
     if (unlikely(!instance)) {
       // Exit early if the state vector is invalid
-      if (!this->validatePipelineState(state, true))
+      if (!this->validatePipelineState(state, true)) {
+        if (m_pipeMgr->m_asyncLog) {
+          static std::atomic<uint32_t> count = { 0 };
+
+          if (count.fetch_add(1) < 10) {
+            Logger::warn(str::format("panDXVK async: draw dropped, invalid pipeline state, vs=",
+              m_shaders.vs->debugName()));
+          }
+        }
+
         return VK_NULL_HANDLE;
+      }
 
       // Hand the pipeline to the async compiler and skip the draw
       if (m_pipeMgr->m_compiler != nullptr) {
@@ -109,17 +121,28 @@ namespace dxvk {
   }
 
 
-  void DxvkGraphicsPipeline::compilePipelineAsync(
+  bool DxvkGraphicsPipeline::compilePipelineAsync(
     const DxvkGraphicsPipelineStateInfo& state,
     const DxvkRenderPass*                renderPass) {
     std::lock_guard<dxvk::mutex> lock(m_mutex);
 
-    if (!this->findInstance(state, renderPass)) {
-      this->createInstance(state, renderPass);
+    DxvkGraphicsPipelineInstance* instance = this->findInstance(state, renderPass);
 
-      if (m_pipeMgr->m_gplAsyncCache)
+    if (!instance) {
+      instance = this->createInstance(state, renderPass);
+
+      if (m_pipeMgr->m_gplAsyncCache && instance->pipeline() != VK_NULL_HANDLE) {
         this->writePipelineStateToCache(state, renderPass->format());
+
+        if (m_pipeMgr->m_asyncLog) {
+          Logger::info(str::format("panDXVK async: state cache ",
+            m_pipeMgr->m_stateCache != nullptr ? "write for " : "disabled, nothing written for ",
+            "vs=", m_shaders.vs->debugName()));
+        }
+      }
     }
+
+    return instance->pipeline() != VK_NULL_HANDLE;
   }
 
 
