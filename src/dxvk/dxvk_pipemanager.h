@@ -106,6 +106,7 @@ namespace dxvk {
     std::atomic<uint32_t>     m_numGraphicsPipelines = { 0 };
 
     bool                      m_gplAsyncCache = false;
+    bool                      m_asyncLog = false;
     
     dxvk::mutex m_mutex;
     
