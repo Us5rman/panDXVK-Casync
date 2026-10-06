@@ -109,7 +109,7 @@ jobs:
           }
           JSONEOF
           tar -cf ../pandxvk.tar system32/ syswow64/ profile.json
-          zstd --ultra -7 -f ../pandxvk.tar -o "../${{ env.FILE_BASE }}.wcp"
+          zstd --ultra -22 -f ../pandxvk.tar -o "../${{ env.FILE_BASE }}.wcp"
           rm ../pandxvk.tar
           ls -l ../pandxvk-*.wcp
 
