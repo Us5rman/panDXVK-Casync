@@ -224,8 +224,9 @@ namespace dxvk {
      * enabled, writes the state to the cache.
      * \param [in] state Pipeline state vector
      * \param [in] renderPass The render pass
+     * \returns \c true if a pipeline was created
      */
-    void compilePipelineAsync(
+    bool compilePipelineAsync(
       const DxvkGraphicsPipelineStateInfo&    state,
       const DxvkRenderPass*                   renderPass);
     
