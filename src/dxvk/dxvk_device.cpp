@@ -22,10 +22,20 @@ namespace dxvk {
     auto queueFamilies = m_adapter->findQueueFamilies();
     m_queues.graphics = getQueue(queueFamilies.graphics, 0);
     m_queues.transfer = getQueue(queueFamilies.transfer, 0);
+
+    // Opens the telemetry session. No-op unless PANDXVK_TELEMETRY
+    // is enabled; reads device identity, which is fully populated
+    // by the member initialiser list above.
+    m_report.beginSession(this);
   }
-  
-  
+
+
   DxvkDevice::~DxvkDevice() {
+    // Close telemetry first, while every member is still alive and
+    // before waitForIdle() records teardown-time GPU sync counters
+    // that would otherwise be attributed to the session.
+    m_report.endSession(this);
+
     // Wait for all pending Vulkan commands to be
     // executed before we destroy any resources.
     this->waitForIdle();
@@ -207,7 +217,10 @@ namespace dxvk {
     DxvkPresentInfo presentInfo;
     presentInfo.presenter = presenter;
     m_submissionQueue.present(presentInfo, status);
-    
+
+    // Frame boundary for telemetry: no-op unless enabled.
+    m_report.onPresent(this);
+
     std::lock_guard<sync::Spinlock> statLock(m_statLock);
     m_statCounters.addCtr(DxvkStatCounter::QueuePresentCount, 1);
   }
@@ -221,6 +234,13 @@ namespace dxvk {
     submitInfo.cmdList  = commandList;
     submitInfo.waitSync = waitSync;
     submitInfo.wakeSync = wakeSync;
+
+    // Read this list's draw count before the merge below folds it
+    // into the device totals. Feeds the observational HAAE replay;
+    // it changes nothing about the submit itself.
+    m_report.noteSubmit(
+      commandList->statCounters().getCtr(DxvkStatCounter::CmdDrawCalls));
+
     m_submissionQueue.submit(submitInfo);
 
     std::lock_guard<sync::Spinlock> statLock(m_statLock);
