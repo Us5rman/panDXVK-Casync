@@ -195,6 +195,17 @@ namespace dxvk {
           skippable += 1;
       }
 
+      // Fold the same three numbers into the process-wide totals so
+      // report.json can carry them without a second pass over the
+      // log. Only reachable under the debug gate above, because
+      // m_dbgBinds itself is only filled when that gate passes -
+      // bind totals therefore require DXVK_LOG_LEVEL=debug, same as
+      // the log lines they mirror.
+      DxvkPandxvkBindTotals& totals = pandxvkBindTotals();
+      totals.total     += uint64_t(m_dbgBinds.size());
+      totals.distinct  += distinct;
+      totals.skippable += skippable;
+
       Logger::debug(str::format(
         "dxvk bind stats: total=", uint64_t(m_dbgBinds.size()),
         " distinct=", distinct,

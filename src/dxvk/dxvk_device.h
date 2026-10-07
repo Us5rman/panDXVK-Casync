@@ -14,6 +14,7 @@
 #include "dxvk_meta_clear.h"
 #include "dxvk_objects.h"
 #include "dxvk_options.h"
+#include "dxvk_pandxvk_report.h"
 #include "dxvk_pipecache.h"
 #include "dxvk_pipemanager.h"
 #include "dxvk_queue.h"
@@ -510,6 +511,11 @@ namespace dxvk {
     DxvkRecycler<DxvkDescriptorPool, 16> m_recycledDescriptorPools;
     
     DxvkSubmissionQueue m_submissionQueue;
+
+    // panDXVK session telemetry. Every write it performs is gated
+    // on PANDXVK_TELEMETRY, so with the variable unset this object
+    // costs a single bool test per call and touches no files.
+    DxvkPandxvkReport   m_report;
 
     DxvkDevicePerfHints getPerfHints();
     
