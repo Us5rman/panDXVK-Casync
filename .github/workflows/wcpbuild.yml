@@ -14,8 +14,7 @@ permissions:
   contents: read
 
 env:
-  VERSION_NAME: Casync
-  FILE_BASE: Casync
+  NAME_PREFIX: panDXVK-1.10.3-Casync
 
 jobs:
   build:
@@ -71,13 +70,9 @@ jobs:
             echo "::warning::These DLLs are from ${BUILT:0:7} but main is at ${HEAD_SHA:0:7}. Run Build DXVK again to include the newest commit."
           fi
 
-      - name: Version code from commit hash
-        id: version
+      - name: Package name
         run: |
-          SHA="${{ steps.get-sha.outputs.full_sha }}"
-          CODE=$((16#${SHA:0:7}))
-          echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          echo "Version code $CODE comes from commit ${SHA:0:7}"
+          echo "PKG_NAME=${NAME_PREFIX}-${{ steps.get-sha.outputs.sha }}" >> "$GITHUB_ENV"
 
       - name: Download build DLLs
         uses: actions/download-artifact@v4
@@ -105,7 +100,6 @@ jobs:
       - name: Package WCP
         env:
           RELEASE_DESC: ${{ inputs.release_description }}
-          VERSION_CODE: ${{ steps.version.outputs.code }}
         run: |
           cd ./workdir
           python3 - <<'PY'
@@ -126,8 +120,8 @@ jobs:
 
           profile = {
               'type': 'DXVK',
-              'versionName': os.environ['VERSION_NAME'],
-              'versionCode': int(os.environ['VERSION_CODE']),
+              'versionName': os.environ['PKG_NAME'],
+              'versionCode': 0,
               'description': desc,
               'files': files,
           }
@@ -138,13 +132,13 @@ jobs:
 
           cat profile.json
           tar -cf ../pandxvk.tar system32/ syswow64/ profile.json
-          zstd -22 -f ../pandxvk.tar -o "../${FILE_BASE}.wcp"
+          zstd -22 -f ../pandxvk.tar -o "../${PKG_NAME}.wcp"
           rm ../pandxvk.tar
-          ls -l "../${FILE_BASE}.wcp"
+          ls -l "../${PKG_NAME}.wcp"
 
       - name: Upload WCP
         uses: actions/upload-artifact@v4
         with:
-          name: wcp-${{ env.FILE_BASE }}-${{ steps.get-sha.outputs.sha }}
-          path: ./${{ env.FILE_BASE }}.wcp
+          name: wcp-${{ env.PKG_NAME }}
+          path: ./${{ env.PKG_NAME }}.wcp
           compression-level: 0
