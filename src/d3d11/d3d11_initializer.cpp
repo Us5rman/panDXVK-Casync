@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstring>
 #include <memory>
 
@@ -172,6 +173,19 @@ namespace dxvk {
                 VkDeviceSize astcSlicePitch = util::computeAstcImageDataSize(
                   mipLevelExtent.width, mipLevelExtent.height);
 
+                // panDXVK: the only transcode cost metric on this path.
+                // UpdateSubresource1 times its own encode (d3d11_context.cpp),
+                // but a title that only ever reaches CreateTexture hits this
+                // initializer alone - so its cost was recorded in bytes and
+                // never in time. Clock reads are skipped entirely unless
+                // debug logging is on, keeping release builds free.
+                const bool logTranscodeTiming = Logger::logLevel() >= LogLevel::Debug;
+
+                std::chrono::high_resolution_clock::time_point t0;
+
+                if (logTranscodeTiming)
+                  t0 = std::chrono::high_resolution_clock::now();
+
                 transcoded = std::make_unique<uint8_t[]>(
                   static_cast<size_t>(astcSlicePitch * mipLevelExtent.depth));
 
@@ -192,23 +206,28 @@ namespace dxvk {
                 uploadSlicePitch = astcSlicePitch;
 
                 // Metric: which subresource the initializer transcode
-                // consumed. The UpdateSubresource1 path owns the only other
-                // transcode logging (timings + force notice), so without this
-                // line a title that only ever calls the initializer shows zero
-                // transcode evidence and is indistinguishable from a gate that
-                // never opened. Fires once per layer/mip at resource creation,
-                // never per frame. Deliberately NOT inside #ifndef NDEBUG:
-                // this is functional evidence, not a diagnostic, and release
-                // builds must still be able to prove the transcode ran. The
-                // runtime log-level check keeps it free by default.
-                if (Logger::logLevel() >= LogLevel::Debug) {
+                // consumed, and how long it took. The UpdateSubresource1
+                // path owns the only other transcode logging, so without
+                // this line a title that only ever calls the initializer
+                // shows zero transcode evidence - and zero cost - and is
+                // indistinguishable from a gate that never opened. Fires
+                // once per layer/mip at resource creation, never per frame.
+                // Deliberately NOT inside #ifndef NDEBUG: this is functional
+                // evidence, not a diagnostic, and release builds must still
+                // be able to prove the transcode ran. The runtime log-level
+                // check keeps it free by default.
+                if (logTranscodeTiming) {
+                  const auto t1 = std::chrono::high_resolution_clock::now();
+                  const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
                   Logger::debug(str::format(
                     "panDXVK: BC→ASTC initializer upload ",
                     mipLevelExtent.width, "x", mipLevelExtent.height,
                     " depth=", mipLevelExtent.depth,
                     " DXGI_FORMAT=", desc->Format,
                     " mip=", level, " layer=", layer,
-                    " ", astcSlicePitch * mipLevelExtent.depth, "B"));
+                    " ", astcSlicePitch * mipLevelExtent.depth, "B",
+                    " ", ms, "ms"));
                 }
               }
 
