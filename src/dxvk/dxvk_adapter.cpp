@@ -837,6 +837,27 @@ namespace dxvk {
     }
 
     m_vki->vkGetPhysicalDeviceFeatures2(m_handle, &m_deviceFeatures.core);
+    
+    if (m_deviceExtensions.supports(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME)) {
+      const auto& gplFeatures = m_deviceFeatures.extGraphicsPipelineLibrary;
+      const auto& gplProps    = m_deviceInfo.extGraphicsPipelineLibrary;
+
+      bool hasLibraryExt = m_deviceExtensions.supports(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME) != 0;
+
+      bool usable = hasLibraryExt
+        && gplFeatures.graphicsPipelineLibrary
+        && gplProps.graphicsPipelineLibraryFastLinking
+        && gplProps.graphicsPipelineLibraryIndependentInterpolationDecoration;
+
+      Logger::info(str::format("panDXVK: graphics pipeline library: feature=",
+        gplFeatures.graphicsPipelineLibrary ? 1 : 0, ", fast linking=",
+        gplProps.graphicsPipelineLibraryFastLinking ? 1 : 0, ", independent interpolation=",
+        gplProps.graphicsPipelineLibraryIndependentInterpolationDecoration ? 1 : 0,
+        ", VK_KHR_pipeline_library=", hasLibraryExt ? 1 : 0, " -> ",
+        usable ? "usable by PANDXVK_GPLASYNC=2" : "not usable, PANDXVK_GPLASYNC=2 runs as 1"));
+    } else {
+      Logger::info("panDXVK: graphics pipeline library: extension not exposed, PANDXVK_GPLASYNC=2 runs as 1");
+    }
   }
 
 
