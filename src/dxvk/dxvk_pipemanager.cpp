@@ -16,6 +16,17 @@ namespace dxvk {
     Logger::info(str::format("panDXVK: async=", options.enableAsync,
       " gplasync=", options.enableGplAsync));
 
+    if (options.gplAsyncMode == 2) {
+      bool featureOn = device->features().extGraphicsPipelineLibrary.graphicsPipelineLibrary;
+      bool interp = device->properties().extGraphicsPipelineLibrary.graphicsPipelineLibraryIndependentInterpolationDecoration;
+
+      Logger::info(str::format("panDXVK gplasync: mode 2 requested, library feature enabled=",
+        featureOn ? 1 : 0, " independent interpolation=", interp ? 1 : 0, " -> ",
+        (featureOn && interp)
+          ? "device can use libraries, but the library path is not in this build yet, running mode 1"
+          : "device cannot use libraries, running mode 1"));
+    }
+
     if (options.enableAsync || options.enableGplAsync) {
       int32_t numThreads = options.numAsyncThreads;
 
