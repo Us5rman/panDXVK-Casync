@@ -172,12 +172,12 @@ namespace dxvk {
     m_reportDir = reportRoot();
     m_markerPath = joinPath(m_reportDir, g_markerName);
 
-    if (!env::createDirectory(m_reportDir)) {
-      Logger::warn(str::format(
-        "panDXVK telemetry: cannot create ", m_reportDir, ", disabling"));
-      m_enabled = false;
-      return;
-    }
+    // CreateDirectoryW reports failure both when a parent is missing and
+    // when the directory already exists, and util_env cannot tell the two
+    // apart. The second case is the normal state from the second run
+    // onward, so this is only a best-effort create: the marker probe
+    // below is what decides whether the directory is usable.
+    env::createDirectory(m_reportDir);
 
     // An orphaned marker means the previous session never reached
     // endSession(): the process died first.
