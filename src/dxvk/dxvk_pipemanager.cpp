@@ -15,16 +15,24 @@ namespace dxvk {
 
     Logger::info(str::format("panDXVK: async=", options.enableAsync,
       " gplasync=", options.gplAsyncMode));
-    
+
     if (options.gplAsyncMode == 2) {
-      bool featureOn = device->features().extGraphicsPipelineLibrary.graphicsPipelineLibrary;
-      bool interp = device->properties().extGraphicsPipelineLibrary.graphicsPipelineLibraryIndependentInterpolationDecoration;
+      const auto& gplFeatures = device->features().extGraphicsPipelineLibrary;
+      const auto& gplProps    = device->properties().extGraphicsPipelineLibrary;
+
+      bool usable = gplFeatures.graphicsPipelineLibrary
+        && gplProps.graphicsPipelineLibraryFastLinking
+        && gplProps.graphicsPipelineLibraryIndependentInterpolationDecoration;
+
+      m_gplRequested = true;
+      m_gplLibraries = usable;
 
       Logger::info(str::format("panDXVK gplasync: mode 2 requested, library feature enabled=",
-        featureOn ? 1 : 0, " independent interpolation=", interp ? 1 : 0, " -> ",
-        (featureOn && interp)
-          ? "device can use libraries, but the library path is not in this build yet, running mode 1"
-          : "device cannot use libraries, running mode 1"));
+        gplFeatures.graphicsPipelineLibrary ? 1 : 0, " fast linking=",
+        gplProps.graphicsPipelineLibraryFastLinking ? 1 : 0, " independent interpolation=",
+        gplProps.graphicsPipelineLibraryIndependentInterpolationDecoration ? 1 : 0, " -> ",
+        usable ? "graphics pipeline libraries ACTIVE"
+               : "libraries unavailable on this device, running mode 1"));
     }
 
     if (options.enableAsync || options.enableGplAsync) {
@@ -62,6 +70,19 @@ namespace dxvk {
   DxvkPipelineManager::~DxvkPipelineManager() {
     if (m_compiler != nullptr)
       m_compiler->stopWorkerThreads();
+
+    if (m_gplRequested) {
+      Logger::info(str::format("panDXVK gplasync: summary, libraries created (vertex input/pre-raster/fragment shader/fragment output) ",
+        m_gplStats.created[0].load(), "/", m_gplStats.created[1].load(), "/",
+        m_gplStats.created[2].load(), "/", m_gplStats.created[3].load(),
+        ", reused ", m_gplStats.reused[0].load(), "/", m_gplStats.reused[1].load(), "/",
+        m_gplStats.reused[2].load(), "/", m_gplStats.reused[3].load(),
+        ", pipelines linked ", m_gplStats.linked.load(),
+        ", fallbacks to full compile ", m_gplStats.fallbacks.load(),
+        ", library time ", m_gplStats.libMicros.load() / 1000, " ms",
+        ", link time ", m_gplStats.linkMicros.load() / 1000, " ms",
+        ", library path ", m_gplLibraries.load() ? "still on" : "off"));
+    }
   }
   
   
