@@ -565,6 +565,19 @@ namespace dxvk {
       // full interval rather than a fraction of one.
       m_csvLastNs  = now;
       m_csvStartNs = now;
+
+      // The first row diffs against m_csvBase, but m_csvBase is only
+      // re-sampled after a row is written. Without seeding it here the
+      // first row reports lifetime totals since device creation rather
+      // than this window's delta - seen as 142% GPU idle on row 0.
+      DxvkStatCounters counters;
+
+      if (device != nullptr)
+        counters = device->getStatCounters();
+
+      for (size_t i = 0; i < DxvkPandxvkReport::CsvCounterCount; i++)
+        m_csvBase[i] = counters.getCtr(g_csvCounters[i]);
+
       return;
     }
 
