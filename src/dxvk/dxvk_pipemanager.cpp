@@ -14,8 +14,8 @@ namespace dxvk {
     const DxvkOptions& options = device->config();
 
     Logger::info(str::format("panDXVK: async=", options.enableAsync,
-      " gplasync=", options.enableGplAsync));
-
+      " gplasync=", options.gplAsyncMode));
+    
     if (options.gplAsyncMode == 2) {
       bool featureOn = device->features().extGraphicsPipelineLibrary.graphicsPipelineLibrary;
       bool interp = device->properties().extGraphicsPipelineLibrary.graphicsPipelineLibraryIndependentInterpolationDecoration;
