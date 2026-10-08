@@ -10,6 +10,19 @@ namespace dxvk {
   }
 
 
+  static int32_t getMode(const char* env, int32_t value) {
+    std::string str = env::getEnvVar(env);
+
+    if (str.empty())
+      return value;
+
+    if (str == "0")
+      return 0;
+
+    return str == "2" ? 2 : 1;
+  }
+
+
   DxvkOptions::DxvkOptions(const Config& config) {
     enableDebugUtils      = config.getOption<bool>    ("dxvk.enableDebugUtils",       false);
     enableStateCache      = config.getOption<bool>    ("dxvk.enableStateCache",       true);
@@ -19,8 +32,15 @@ namespace dxvk {
     shrinkNvidiaHvvHeap   = config.getOption<Tristate>("dxvk.shrinkNvidiaHvvHeap",    Tristate::Auto);
     hud                   = config.getOption<std::string>("dxvk.hud", "");
 
+    int32_t confMode = config.getOption<int32_t>("dxvk.gplAsyncMode", 0);
+
+    if (confMode == 0 && config.getOption<bool>("dxvk.enableGplAsync", false))
+      confMode = 1;
+
+    gplAsyncMode   = getMode("PANDXVK_GPLASYNC", confMode);
+    enableGplAsync = gplAsyncMode >= 1;
+
     enableAsync    = getFlag("PANDXVK_ASYNC",     config.getOption<bool>("dxvk.enableAsync",    false));
-    enableGplAsync = getFlag("PANDXVK_GPLASYNC",  config.getOption<bool>("dxvk.enableGplAsync", false));
     enableDyAsync  = getFlag("PANDXVK_DYASYNC",   config.getOption<bool>("dxvk.enableDyAsync",  false));
     enableAsyncLog = getFlag("PANDXVK_ASYNC_LOG", config.getOption<bool>("dxvk.asyncLog",       false));
   }
