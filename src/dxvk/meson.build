@@ -77,6 +77,7 @@ dxvk_src = files([
   'dxvk_gpu_event.cpp',
   'dxvk_gpu_query.cpp',
   'dxvk_graphics.cpp',
+  'dxvk_graphics_lib.cpp',
   'dxvk_image.cpp',
   'dxvk_instance.cpp',
   'dxvk_lifetime.cpp',
