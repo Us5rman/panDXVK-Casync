@@ -46,6 +46,16 @@ namespace dxvk {
   DxvkGraphicsPipeline::~DxvkGraphicsPipeline() {
     for (const auto& instance : m_pipelines)
       this->destroyPipeline(instance.pipeline());
+
+    auto destroyAll = [this] (const std::vector<LibraryEntry>& libs) {
+      for (const auto& lib : libs)
+        this->destroyPipeline(lib.pipeline);
+    };
+
+    destroyAll(m_vertexInputLibs);
+    destroyAll(m_preRasterLibs);
+    destroyAll(m_fragmentShaderLibs);
+    destroyAll(m_fragmentOutputLibs);
   }
   
   
