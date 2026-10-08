@@ -159,7 +159,26 @@ namespace dxvk {
   DxvkGraphicsPipelineInstance* DxvkGraphicsPipeline::createInstance(
     const DxvkGraphicsPipelineStateInfo& state,
     const DxvkRenderPass*                renderPass) {
-    VkPipeline pipeline = this->createPipeline(state, renderPass);
+    VkPipeline pipeline = VK_NULL_HANDLE;
+
+    if (m_pipeMgr->m_gplLibraries.load()) {
+      pipeline = this->linkPipeline(state, renderPass);
+
+      if (pipeline == VK_NULL_HANDLE) {
+        uint32_t count = m_pipeMgr->m_gplStats.fallbacks.fetch_add(1) + 1;
+
+        Logger::warn(str::format("panDXVK gplasync: library path failed, compiling normally, vs=",
+          m_shaders.vs->debugName()));
+
+        if (count >= 8 && m_pipeMgr->m_gplLibraries.exchange(false)) {
+          Logger::err(str::format("panDXVK gplasync: library path disabled after ",
+            count, " failures, continuing with normal compiles"));
+        }
+      }
+    }
+
+    if (pipeline == VK_NULL_HANDLE)
+      pipeline = this->createPipeline(state, renderPass);
 
     m_pipeMgr->m_numGraphicsPipelines += 1;
     return &(*m_pipelines.emplace(state, renderPass, pipeline));
