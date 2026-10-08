@@ -21,8 +21,12 @@ namespace dxvk {
     /// Compile graphics pipelines asynchronously
     bool enableAsync;
 
+    /// Gplasync mode: 0 off, 1 async with state cache
+    /// writes, 2 async using graphics pipeline libraries
+    int32_t gplAsyncMode;
+
     /// Compile graphics pipelines asynchronously
-    /// using graphics pipeline libraries
+    /// and persist them to the state cache
     bool enableGplAsync;
 
     /// Compile graphics pipelines asynchronously
