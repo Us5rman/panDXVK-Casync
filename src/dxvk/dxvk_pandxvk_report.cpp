@@ -71,6 +71,76 @@ namespace dxvk {
       return str::format(major, ".", minor, ".", patch);
     }
 
+    // RFC 4180: a field is quoted when it holds a comma, a quote or a
+    // newline, and embedded quotes are doubled. Device names come from
+    // the driver and cannot be assumed comma-free.
+    std::string csvEscape(const std::string& value) {
+      const bool needsQuotes = value.find_first_of(",\"\n\r") != std::string::npos;
+
+      if (!needsQuotes)
+        return value;
+
+      std::string result;
+      result.reserve(value.size() + 8);
+      result += '"';
+
+      for (const char c : value) {
+        if (c == '"')
+          result += '"';
+        result += c;
+      }
+
+      result += '"';
+      return result;
+    }
+
+    std::string csvDouble(double value, int precision) {
+      return formatDouble(value, precision);
+    }
+
+    // Order is significant: index i in this table is the i-th counter
+    // column of the CSV header below, and the header declares
+    // CsvCounterCount in the report header. static_assert enforces
+    // that the three have not drifted apart.
+    enum CsvCounter : size_t {
+      CsvDraws = 0,
+      CsvDispatches,
+      CsvSubmits,
+      CsvPresents,
+      CsvRenderPasses,
+      CsvBarriers,
+      CsvPipesGfx,
+      CsvPipesCompute,
+      CsvIdleUs,
+      CsvSyncUs,
+    };
+
+    constexpr std::array<DxvkStatCounter, DxvkPandxvkReport::CsvCounterCount> g_csvCounters = { {
+      DxvkStatCounter::CmdDrawCalls,
+      DxvkStatCounter::CmdDispatchCalls,
+      DxvkStatCounter::QueueSubmitCount,
+      DxvkStatCounter::QueuePresentCount,
+      DxvkStatCounter::CmdRenderPassCount,
+      DxvkStatCounter::CmdBarrierCount,
+      DxvkStatCounter::PipeCountGraphics,
+      DxvkStatCounter::PipeCountCompute,
+      DxvkStatCounter::GpuIdleTicks,
+      DxvkStatCounter::GpuSyncTicks,
+    } };
+
+    static_assert(CsvSyncUs + 1 == DxvkPandxvkReport::CsvCounterCount,
+      "CSV counter table and CsvCounterCount have drifted apart");
+
+    // Identity columns first, then window rates, then the counter
+    // block in exactly the order of g_csvCounters.
+    constexpr const char* g_csvHeader =
+      "session_id,elapsed_s,row_index,game_name,device_name,"
+      "vendor_id,device_id,api_version,driver_version_raw,driver_id,"
+      "window_s,frames,fps_window,fps_avg,fps_min,frame_ms_avg,"
+      "draws,dispatches,submits,presents,"
+      "render_passes,barriers,pipelines_gfx,pipelines_compute,"
+      "gpu_idle_us,gpu_sync_us";
+
   }
 
 
@@ -102,6 +172,15 @@ namespace dxvk {
   uint64_t DxvkPandxvkReport::monotonicNs() {
     return uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count());
+  }
+
+
+  uint64_t DxvkPandxvkReport::wallClockSec() {
+    // Session identity only, so a wall clock is acceptable here even
+    // though monotonicNs() is used for every interval measurement.
+    // Two runs of the same game then differ by this field alone.
+    return uint64_t(std::chrono::duration_cast<std::chrono::seconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count());
   }
 
 
@@ -205,6 +284,11 @@ namespace dxvk {
     m_haveBaseline  = false;
     m_lastPresentNs = monotonicNs();
 
+    // Identity and the timeline file are established up front so that
+    // rows appear even for a run that never reaches endSession().
+    m_sessionEpochS = wallClockSec();
+    openCsv();
+
     Logger::info(str::format(
       "panDXVK telemetry: session ", m_gameName, " -> ", m_reportDir));
   }
@@ -235,6 +319,17 @@ namespace dxvk {
       m_fpsHistogram[bucket] += 1;
 
       m_frames += 1;
+
+      // Window accumulators behind the CSV timeline. They are reset
+      // when a row is written, so they always describe the interval
+      // currently in flight rather than the session so far.
+      m_winFrames += 1;
+      m_winSumNs  += deltaNs;
+
+      if (!m_winHaveMin || fps < m_winMinFps) {
+        m_winMinFps  = fps;
+        m_winHaveMin = true;
+      }
     }
 
     m_lastPresentNs = now;
@@ -266,6 +361,8 @@ namespace dxvk {
     m_prevSubmits = submits;
     m_prevDraws   = draws;
     m_prevIdleUs  = idleUs;
+
+    maybeDumpCsv(device, now);
   }
 
 
@@ -301,6 +398,12 @@ namespace dxvk {
     writeReport(device);
     writeAttachments();
 
+    // Flush the interval still in flight. Without this a run shorter
+    // than CsvIntervalNs would leave no timeline row at all, which is
+    // exactly the shape of a first tester run.
+    if (m_csvOk && m_winFrames > 0 && m_csvLastNs != 0)
+      writeCsvRow(device, monotonicNs());
+
     // A marker still present here is a clean exit: remove it so
     // the next launch does not report a crash that did not happen.
     removeMarker();
@@ -309,7 +412,7 @@ namespace dxvk {
 
     Logger::info(str::format(
       "panDXVK telemetry: wrote ", m_reportDir, "/report.json",
-      " (", m_frames, " frames)"));
+      " (", m_frames, " frames, ", m_csvRows, " timeline rows)"));
   }
 
 
@@ -320,6 +423,155 @@ namespace dxvk {
     if (std::remove(m_markerPath.c_str()) != 0)
       Logger::debug(str::format(
         "panDXVK telemetry: marker not removed: ", m_markerPath));
+  }
+
+
+  void DxvkPandxvkReport::openCsv() {
+    m_csvPath = joinPath(m_reportDir, "timeline.csv");
+
+    // The header is written only when the file is new or empty, so a
+    // second run appends to the same timeline instead of restarting
+    // it. session_id is what lets a reader split the runs apart.
+    bool wantHeader = true;
+
+    {
+      std::ifstream probe(m_csvPath.c_str());
+      if (probe.is_open() && probe.peek() != std::char_traits<char>::eof())
+        wantHeader = false;
+    }
+
+    std::ofstream file(m_csvPath.c_str(), std::ios_base::app);
+
+    if (!file.is_open()) {
+      Logger::warn(str::format(
+        "panDXVK telemetry: cannot open ", m_csvPath,
+        ", timeline disabled"));
+      m_csvOk = false;
+      return;
+    }
+
+    if (wantHeader) {
+      file << g_csvHeader << '\n';
+      file.flush();
+    }
+
+    m_csvOk = true;
+  }
+
+
+  void DxvkPandxvkReport::writeCsvRow(DxvkDevice* device, uint64_t now) {
+    if (!m_csvOk || m_csvPath.empty())
+      return;
+
+    // Open, append and close per row. Sixty seconds between rows
+    // makes the syscall irrelevant, and a handle that is never held
+    // across a frame is a handle a crash cannot leave unflushed.
+    std::ofstream file(m_csvPath.c_str(), std::ios_base::app);
+
+    if (!file.is_open()) {
+      Logger::warn(str::format(
+        "panDXVK telemetry: cannot append ", m_csvPath,
+        ", timeline disabled"));
+      m_csvOk = false;
+      return;
+    }
+
+    const auto& props = device != nullptr
+      ? device->properties().core.properties
+      : VkPhysicalDeviceProperties { };
+
+    const auto& driver = device != nullptr
+      ? device->properties().khrDeviceDriverProperties
+      : VkPhysicalDeviceDriverPropertiesKHR { };
+
+    DxvkStatCounters counters;
+
+    if (device != nullptr)
+      counters = device->getStatCounters();
+
+    // Each counter column is the delta against the window base. A
+    // counter that went backwards - a reset - is reported as zero
+    // rather than as an enormous unsigned difference.
+    uint64_t values[DxvkPandxvkReport::CsvCounterCount] = { };
+
+    for (size_t i = 0; i < DxvkPandxvkReport::CsvCounterCount; i++) {
+      const uint64_t current = counters.getCtr(g_csvCounters[i]);
+      values[i] = current >= m_csvBase[i] ? current - m_csvBase[i] : 0;
+    }
+
+    const uint64_t elapsedNs = now > m_csvStartNs ? now - m_csvStartNs : 0;
+    const uint64_t windowNs  = now > m_csvLastNs  ? now - m_csvLastNs  : 0;
+
+    const double windowSec = double(windowNs)  / 1.0e9;
+    const double elapsedSec = double(elapsedNs) / 1.0e9;
+
+    const double fpsWindow = windowSec > 0.0 && m_winFrames
+      ? double(m_winFrames) / windowSec
+      : 0.0;
+
+    const double fpsAvg = elapsedSec > 0.0 && m_frames
+      ? double(m_frames) / elapsedSec
+      : 0.0;
+
+    const double frameMsAvg = m_winFrames
+      ? (double(m_winSumNs) / double(m_winFrames)) / 1.0e6
+      : 0.0;
+
+    const double fpsMin = m_winHaveMin ? m_winMinFps : 0.0;
+
+    file
+      << m_sessionEpochS << ','
+      << csvDouble(elapsedSec, 3) << ','
+      << m_csvRows << ','
+      << csvEscape(m_gameName) << ','
+      << csvEscape(props.deviceName) << ','
+      << props.vendorID << ','
+      << props.deviceID << ','
+      << csvEscape(formatVersion(props.apiVersion)) << ','
+      << props.driverVersion << ','
+      << (VkDriverId(driver.driverID) != VkDriverId(0) ? uint32_t(driver.driverID) : 0u) << ','
+      << csvDouble(windowSec, 3) << ','
+      << m_winFrames << ','
+      << csvDouble(fpsWindow, 3) << ','
+      << csvDouble(fpsAvg, 3) << ','
+      << csvDouble(fpsMin, 3) << ','
+      << csvDouble(frameMsAvg, 3);
+
+    for (size_t i = 0; i < DxvkPandxvkReport::CsvCounterCount; i++)
+      file << ',' << values[i];
+
+    file << '\n';
+    file.flush();
+
+    // The row is on disk; this window is now closed.
+    m_csvRows     += 1;
+    m_csvLastNs    = now;
+    m_winFrames    = 0;
+    m_winSumNs     = 0;
+    m_winMinFps    = 0.0;
+    m_winHaveMin   = false;
+
+    for (size_t i = 0; i < DxvkPandxvkReport::CsvCounterCount; i++)
+      m_csvBase[i] = counters.getCtr(g_csvCounters[i]);
+  }
+
+
+  void DxvkPandxvkReport::maybeDumpCsv(DxvkDevice* device, uint64_t now) {
+    if (!m_csvOk)
+      return;
+
+    if (m_csvLastNs == 0) {
+      // Start the clock at the first present so that row 0 covers a
+      // full interval rather than a fraction of one.
+      m_csvLastNs  = now;
+      m_csvStartNs = now;
+      return;
+    }
+
+    if (now - m_csvLastNs < CsvIntervalNs)
+      return;
+
+    writeCsvRow(device, now);
   }
 
 
