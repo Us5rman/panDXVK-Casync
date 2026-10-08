@@ -569,8 +569,11 @@ namespace dxvk {
     VkSampleCountFlagBits sampleCount = getSampleCount(state);
 
     LibraryKey key;
-    key.state.ms = state.ms;
-    key.state.om = state.om;
+    key.state.ms      = state.ms;
+    key.state.om      = state.om;
+    key.state.ds      = state.ds;
+    key.state.dsFront = state.dsFront;
+    key.state.dsBack  = state.dsBack;
 
     for (uint32_t i = 0; i < MaxNumRenderTargets; i++) {
       key.state.omBlend[i]   = state.omBlend[i];
@@ -586,6 +589,117 @@ namespace dxvk {
       m_pipeMgr->m_gplStats.reused[LibFragmentOutput] += 1;
       return pipeline;
     }
+
+    DxvkRenderPassFormat passFormat = renderPass->format();
+
+    // Fix up color write masks using the component mappings
+    std::array<VkPipelineColorBlendAttachmentState, MaxNumRenderTargets> omBlendAttachments;
+
+    const VkColorComponentFlags fullMask
+      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+      | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    for (uint32_t i = 0; i < MaxNumRenderTargets; i++) {
+      auto formatInfo = imageFormatInfo(passFormat.color[i].format);
+      omBlendAttachments[i] = state.omBlend[i].state();
+
+      if (!(m_fsOut & (1 << i)) || !formatInfo) {
+        omBlendAttachments[i].colorWriteMask = 0;
+      } else {
+        if (omBlendAttachments[i].colorWriteMask != fullMask) {
+          omBlendAttachments[i].colorWriteMask = util::remapComponentMask(
+            state.omBlend[i].colorWriteMask(), state.omSwizzle[i].mapping());
+        }
+
+        omBlendAttachments[i].colorWriteMask &= formatInfo->componentMask;
+
+        if (omBlendAttachments[i].colorWriteMask == formatInfo->componentMask) {
+          omBlendAttachments[i].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+                                               | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        }
+      }
+    }
+
+    std::array<VkDynamicState, 3> dynamicStates;
+    uint32_t                      dynamicStateCount = 0;
+
+    if (state.useDynamicBlendConstants())
+      dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_BLEND_CONSTANTS;
+
+    if (state.useDynamicDepthBounds())
+      dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_DEPTH_BOUNDS;
+
+    if (state.useDynamicStencilRef())
+      dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_STENCIL_REFERENCE;
+
+    uint32_t sampleMask = state.ms.sampleMask();
+
+    VkPipelineMultisampleStateCreateInfo msInfo;
+    msInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    msInfo.pNext                  = nullptr;
+    msInfo.flags                  = 0;
+    msInfo.rasterizationSamples   = sampleCount;
+    msInfo.sampleShadingEnable    = m_common.msSampleShadingEnable;
+    msInfo.minSampleShading       = m_common.msSampleShadingFactor;
+    msInfo.pSampleMask            = &sampleMask;
+    msInfo.alphaToCoverageEnable  = state.ms.enableAlphaToCoverage();
+    msInfo.alphaToOneEnable       = VK_FALSE;
+
+    VkPipelineDepthStencilStateCreateInfo dsInfo;
+    dsInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    dsInfo.pNext                  = nullptr;
+    dsInfo.flags                  = 0;
+    dsInfo.depthTestEnable        = state.ds.enableDepthTest();
+    dsInfo.depthWriteEnable       = state.ds.enableDepthWrite() && !util::isDepthReadOnlyLayout(passFormat.depth.layout);
+    dsInfo.depthCompareOp         = state.ds.depthCompareOp();
+    dsInfo.depthBoundsTestEnable  = state.ds.enableDepthBoundsTest();
+    dsInfo.stencilTestEnable      = state.ds.enableStencilTest();
+    dsInfo.front                  = state.dsFront.state();
+    dsInfo.back                   = state.dsBack.state();
+    dsInfo.minDepthBounds         = 0.0f;
+    dsInfo.maxDepthBounds         = 1.0f;
+
+    VkPipelineColorBlendStateCreateInfo cbInfo;
+    cbInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    cbInfo.pNext                  = nullptr;
+    cbInfo.flags                  = 0;
+    cbInfo.logicOpEnable          = state.om.enableLogicOp();
+    cbInfo.logicOp                = state.om.logicOp();
+    cbInfo.attachmentCount        = DxvkLimits::MaxNumRenderTargets;
+    cbInfo.pAttachments           = omBlendAttachments.data();
+
+    for (uint32_t i = 0; i < 4; i++)
+      cbInfo.blendConstants[i] = 0.0f;
+
+    VkPipelineDynamicStateCreateInfo dyInfo;
+    dyInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dyInfo.pNext                  = nullptr;
+    dyInfo.flags                  = 0;
+    dyInfo.dynamicStateCount      = dynamicStateCount;
+    dyInfo.pDynamicStates         = dynamicStates.data();
+
+    VkGraphicsPipelineCreateInfo info = { };
+    info.sType                = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    info.pMultisampleState    = &msInfo;
+    info.pDepthStencilState   = &dsInfo;
+    info.pColorBlendState     = &cbInfo;
+    info.pDynamicState        = &dyInfo;
+    info.layout               = m_layout->pipelineLayout();
+    info.renderPass           = renderPass->getDefaultHandle();
+    info.subpass              = 0;
+    info.basePipelineHandle   = VK_NULL_HANDLE;
+    info.basePipelineIndex    = -1;
+
+    pipeline = this->createLibrary(info,
+      VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT, LibFragmentOutput);
+
+    if (pipeline == VK_NULL_HANDLE)
+      return VK_NULL_HANDLE;
+
+    m_fragmentOutputLibs.push_back({ key, pipeline });
+    created = true;
+    return pipeline;
+  }
 
     DxvkRenderPassFormat passFormat = renderPass->format();
 
