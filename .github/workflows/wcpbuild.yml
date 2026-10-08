@@ -4,18 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       release_description:
-        description: 'Short description for profile.json'
+        description: 'Short description for profile.json (spaces become hyphens)'
         required: false
         type: string
-        default: 'panDXVK - DXVK fork for PanVK/Mali-G720'
+        default: 'Casync-panDXVK-for-PanVK-Mali'
 
 permissions:
   actions: read
+  contents: read
 
 env:
-  VERSION_NAME: panDXVK 1.10.3 Casync
-  VERSION_CODE: 1
-  FILE_BASE: pandxvk-1.10.3-casync
+  VERSION_NAME: Casync
+  FILE_BASE: Casync
 
 jobs:
   build:
@@ -60,6 +60,25 @@ jobs:
           echo "sha=${FULL_SHA:0:7}" >> "$GITHUB_OUTPUT"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
+      - name: Check the build is the newest commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BUILT="${{ steps.get-sha.outputs.full_sha }}"
+          HEAD_SHA=$(gh api "repos/${{ github.repository }}/commits/main" --jq '.sha')
+          echo "Packaging DLLs built from ${BUILT:0:7}, main is at ${HEAD_SHA:0:7}"
+          if [ "$BUILT" != "$HEAD_SHA" ]; then
+            echo "::warning::These DLLs are from ${BUILT:0:7} but main is at ${HEAD_SHA:0:7}. Run Build DXVK again to include the newest commit."
+          fi
+
+      - name: Version code from commit hash
+        id: version
+        run: |
+          SHA="${{ steps.get-sha.outputs.full_sha }}"
+          CODE=$((16#${SHA:0:7}))
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "Version code $CODE comes from commit ${SHA:0:7}"
+
       - name: Download build DLLs
         uses: actions/download-artifact@v4
         with:
@@ -84,34 +103,44 @@ jobs:
           mv x32 syswow64
 
       - name: Package WCP
+        env:
+          RELEASE_DESC: ${{ inputs.release_description }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
         run: |
           cd ./workdir
-          cat > profile.json << 'JSONEOF'
-          {
-            "type": "DXVK",
-            "versionName": "${{ env.VERSION_NAME }}",
-            "versionCode": ${{ env.VERSION_CODE }},
-            "description": "${{ inputs.release_description }}",
-            "files": [
-              {"source": "system32/d3d9.dll",      "target": "${system32}/d3d9.dll"},
-              {"source": "system32/d3d10.dll",     "target": "${system32}/d3d10.dll"},
-              {"source": "system32/d3d10_1.dll",   "target": "${system32}/d3d10_1.dll"},
-              {"source": "system32/d3d10core.dll", "target": "${system32}/d3d10core.dll"},
-              {"source": "system32/d3d11.dll",     "target": "${system32}/d3d11.dll"},
-              {"source": "system32/dxgi.dll",      "target": "${system32}/dxgi.dll"},
-              {"source": "syswow64/d3d9.dll",      "target": "${syswow64}/d3d9.dll"},
-              {"source": "syswow64/d3d10.dll",     "target": "${syswow64}/d3d10.dll"},
-              {"source": "syswow64/d3d10_1.dll",   "target": "${syswow64}/d3d10_1.dll"},
-              {"source": "syswow64/d3d10core.dll", "target": "${syswow64}/d3d10core.dll"},
-              {"source": "syswow64/d3d11.dll",     "target": "${syswow64}/d3d11.dll"},
-              {"source": "syswow64/dxgi.dll",      "target": "${syswow64}/dxgi.dll"}
-            ]
+          python3 - <<'PY'
+          import json, os
+
+          desc = '-'.join(os.environ['RELEASE_DESC'].replace('/', ' ').split())
+          if not desc:
+              desc = 'Casync-panDXVK'
+
+          dlls = ['d3d9', 'd3d10', 'd3d10_1', 'd3d10core', 'd3d11', 'dxgi']
+          files = []
+          for folder, var in (('system32', '${system32}'), ('syswow64', '${syswow64}')):
+              for name in dlls:
+                  files.append({
+                      'source': folder + '/' + name + '.dll',
+                      'target': var + '/' + name + '.dll',
+                  })
+
+          profile = {
+              'type': 'DXVK',
+              'versionName': os.environ['VERSION_NAME'],
+              'versionCode': int(os.environ['VERSION_CODE']),
+              'description': desc,
+              'files': files,
           }
-          JSONEOF
+
+          with open('profile.json', 'w') as f:
+              json.dump(profile, f, indent=2)
+          PY
+
+          cat profile.json
           tar -cf ../pandxvk.tar system32/ syswow64/ profile.json
-          zstd --ultra -22 -f ../pandxvk.tar -o "../${{ env.FILE_BASE }}.wcp"
+          zstd -22 -f ../pandxvk.tar -o "../${FILE_BASE}.wcp"
           rm ../pandxvk.tar
-          ls -l ../pandxvk-*.wcp
+          ls -l "../${FILE_BASE}.wcp"
 
       - name: Upload WCP
         uses: actions/upload-artifact@v4
@@ -119,10 +148,3 @@ jobs:
           name: wcp-${{ env.FILE_BASE }}-${{ steps.get-sha.outputs.sha }}
           path: ./${{ env.FILE_BASE }}.wcp
           compression-level: 0
-
-      - name: Upload panDXVK config
-        uses: actions/upload-artifact@v4
-        with:
-          name: pandxvk-config-${{ env.FILE_BASE }}-${{ steps.get-sha.outputs.sha }}
-          path: pandxvk/
-          
