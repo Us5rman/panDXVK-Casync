@@ -84,6 +84,15 @@ namespace dxvk {
       return m_enabled;
     }
 
+    /** Nanoseconds between CSV timeline rows. Fixed at 60 s: no
+     *  interval env var until a real file has been inspected. */
+    static constexpr uint64_t CsvIntervalNs = 60ull * 1000ull * 1000ull * 1000ull;
+
+    /** Number of stat counters carried by each CSV row. Index i of
+     *  this many matches column i of the counter block in the CSV
+     *  header; the .cpp static_asserts that both have not drifted. */
+    static constexpr size_t CsvCounterCount = 10;
+
     /**
      * \brief Opens a session
      *
@@ -154,6 +163,30 @@ namespace dxvk {
     uint64_t m_idleUsTotal   = 0;
     uint64_t m_presentTotal  = 0;
 
+    // Periodic CSV timeline. Rows are emitted from onPresent() on a
+    // fixed interval so that samples already on disk survive a crash,
+    // which report.json cannot do - it only exists once endSession()
+    // runs. Counters are sampled cumulatively and differenced against
+    // m_csvBase, which is re-sampled after every row so each row
+    // carries its own window rather than a session total. The
+    // interval and column count live in the public section above so
+    // that the .cpp can static_assert against them.
+    bool         m_csvOk       = false;
+    uint64_t     m_csvLastNs   = 0;
+    uint64_t     m_csvStartNs  = 0;
+    uint64_t     m_csvRows     = 0;
+    std::array<uint64_t, CsvCounterCount> m_csvBase = { };
+
+    // Window FPS accumulation, reset alongside m_csvBase.
+    uint64_t     m_winFrames   = 0;
+    uint64_t     m_winSumNs    = 0;
+    double       m_winMinFps   = 0.0;
+    bool         m_winHaveMin  = false;
+
+    // Identity for the CSV, captured at beginSession().
+    uint64_t     m_sessionEpochS = 0;
+    std::string  m_csvPath;
+
     // HAAE simulation state. m_haaeRunning[i] holds draws
     // accumulated since threshold i last fired.
     uint64_t m_submitsObserved = 0;
@@ -175,6 +208,20 @@ namespace dxvk {
     void writeAttachments();
     void writeIssueMd(DxvkDevice* device);
     void removeMarker();
+
+    // Periodic CSV timeline helpers.
+    static uint64_t wallClockSec();
+
+    /** Opens timeline.csv in append mode and writes the column
+     *  header only when the file is new or empty. */
+    void openCsv();
+
+    /** Emits one row and re-samples the window base. */
+    void writeCsvRow(DxvkDevice* device, uint64_t now);
+
+    /** Writes a row once CsvIntervalNs has elapsed. Cheap: one
+     *  comparison per present when the interval has not elapsed. */
+    void maybeDumpCsv(DxvkDevice* device, uint64_t now);
 
   };
 
