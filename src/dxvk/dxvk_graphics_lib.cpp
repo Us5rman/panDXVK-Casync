@@ -231,7 +231,7 @@ namespace dxvk {
     info.pNext = &libInfo;
     info.flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
 
-    if (getGplDebug() == 2)
+    if (getGplDebug() == 2 || getGplDebug() == 4)
       info.flags |= VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
 
     auto t0 = dxvk::high_resolution_clock::now();
