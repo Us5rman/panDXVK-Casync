@@ -12,9 +12,8 @@ Target: Mali GPUs under Winlator / Gamehub, through a Vulkan wrapper.
 |---|---|
 | Basic async (`PANDXVK_ASYNC=1`) | Finished and tested. |
 | Gplasync mode 1 (`PANDXVK_GPLASYNC=1`) | Finished and tested. Async plus writing background-compiled pipelines to the state cache. |
-| Gplasync mode 2 (`PANDXVK_GPLASYNC=2`) | Works and renders correctly. Speed advantage over mode 1 aren't fully haven't been fully proven in game. |
+| Gplasync mode 2 (`PANDXVK_GPLASYNC=2`) | Works and renders correctly. Speed advantage over mode 1 haven't been fully proven in games. |
 | Async logging (`PANDXVK_ASYNC_LOG=1`) | Finished. |
-| Real-game comparison against official panDXVK | Not done yet. |
 
 Async removes the freeze that happens when the game needs a pipeline that has not
 been compiled yet. It does not raise the FPS of a game that is already fully
