@@ -185,7 +185,7 @@ touch command lists, descriptors, semaphores or the submission queue, and they a
 joined before pipelines are destroyed. Not reviewed: the dxgi presenter and the
 locking inside `DxvkStateCache::addGraphicsPipeline`.
 
-### Fast link renders nothing with PanVK currently 
+### Fast link black screens when using PanVK currently 
 
 With `PANDXVK_GPLASYNC=2` with AIO test it showed dxvk's hud but none of the
 scene, and the draw count stayed normal. No library or link failed.
@@ -223,10 +223,8 @@ created all four libraries new.
 
 ## 9. Limitations
 
-- No real-game comparison exists yet. "Async reduces shader stutter" rests on the
+- No real-game comparison exists yet. "Async reduces shader stutter" is from the
   compile times and skipped-draw counts above, not on a measured frametime graph.
-- Mode 2 has not been shown to be faster than mode 1. Linking with optimization does
-  the heavy work at link time.
 - Libraries stay in driver memory for reuse. The memory cost is unmeasured.
 - The first draw of a new pipeline is still skipped in every mode.
 - Cache keys include the whole binding mask, so a change in any unbound slot
