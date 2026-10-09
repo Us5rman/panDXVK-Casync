@@ -187,7 +187,7 @@ locking inside `DxvkStateCache::addGraphicsPipeline`.
 
 ### Fast link renders nothing on PanVK currently 
 
-With `PANDXVK_GPLASYNC=2` the AIO test showed the overlay text but none of the
+With `PANDXVK_GPLASYNC=2` with AIO test it showed dxvk's hud but none of the
 scene, and the draw count stayed normal. No library or link failed.
 
 Ruled out: missing depth-stencil state in the fragment output library, the dynamic
@@ -232,32 +232,16 @@ created all four libraries new.
 - Cache keys include the whole binding mask, so a change in any unbound slot
   recreates the pre-raster and fragment libraries. This is safe and lowers reuse.
 
-## 10. Next steps
+## 10. How to test
 
-1. Run the same scene in a real game with no async variables, with
-   `PANDXVK_GPLASYNC=1` and with `=2`, and compare the frametime graph and
-   skipped-draw counts. Use `DXVK_HUD=fps,frametimes,drawcalls,pipelines,compiler`
-   and `DXVK_LOG_LEVEL=info`.
-2. Test `PANDXVK_GPL_FASTLINK=1` on PanVK in a real game. If it renders, mode 2 could
-   reach the fast-link speed it was meant to have.
-3. Measure memory use with and without mode 2.
-4. Report the fast-link result to the wrapper or driver developers: four libraries
-   linked without optimization draw nothing, the same libraries linked with
-   link-time optimization render correctly.
-5. Narrow the library cache keys to the bindings each stage actually uses.
-
-## 11. How to test
-
-1. Install the package and select it in the container's DXVK settings. Check that
-   `panDXVK: v1.10.3 (<hash>)` in `dxgi.log` matches the built commit.
-2. Set the container environment variables, for example `PANDXVK_GPLASYNC=1` and
+1. Set the container environment variables, for example `PANDXVK_GPLASYNC=1` and
    `PANDXVK_ASYNC_LOG=1`.
-3. In `dxgi.log`, search `pipeline library` to see whether the device can use mode 2.
-4. In `d3d11.log`, search `async` or `gplasync`.
-5. For a comparison, run the same scene with no variables, mode 1 and mode 2, and
+2. In `dxgi.log`, search `pipeline library` to see whether the device can use mode 2.
+3. In `d3d11.log`, search `async` or `gplasync`.
+4. For a comparison, run the same scene with no variables, mode 1 and mode 2, and
    keep the logs and a screenshot for each.
 
-## 12. Credits
+## 11. Credits
 
 The idea of skipping a draw and compiling on worker threads is the same one used by
 the public dxvk-async and gplasync patches. This implementation was written for this
