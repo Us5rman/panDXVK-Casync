@@ -1,7 +1,10 @@
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <utility>
+#include <vector>
 
+#include "../util/util_env.h"
 #include "../util/util_time.h"
 
 #include "dxvk_device.h"
@@ -21,6 +24,27 @@ namespace dxvk {
     const char* const LibraryNames[4] = {
       "vertex input", "pre-raster", "fragment shader", "fragment output",
     };
+
+
+    // PANDXVK_GPL_DEBUG: 1 passes the dynamic state list to the link,
+    // 2 does a link-time optimized link, 3 keeps shader modules alive
+    int32_t getGplDebug() {
+      static const int32_t value = [] () -> int32_t {
+        std::string str = env::getEnvVar("PANDXVK_GPL_DEBUG");
+        return str.empty() ? 0 : int32_t(std::atoi(str.c_str()));
+      }();
+
+      return value;
+    }
+
+
+    void keepShaderModule(DxvkShaderModule&& module) {
+      static dxvk::mutex mutex;
+      static auto* kept = new std::vector<DxvkShaderModule>();
+
+      std::lock_guard<dxvk::mutex> lock(mutex);
+      kept->push_back(std::move(module));
+    }
 
 
     VkSampleCountFlagBits getSampleCount(
@@ -109,6 +133,12 @@ namespace dxvk {
     libInfo.libraryCount = 4;
     libInfo.pLibraries   = libs;
 
+    std::array<VkDynamicState, 6> dynamicStates;
+    uint32_t                      dynamicStateCount = 0;
+
+    VkPipelineDynamicStateCreateInfo dyInfo = { };
+    dyInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+
     VkGraphicsPipelineCreateInfo info = { };
     info.sType              = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     info.pNext              = &libInfo;
@@ -118,6 +148,30 @@ namespace dxvk {
     info.subpass            = 0;
     info.basePipelineHandle = VK_NULL_HANDLE;
     info.basePipelineIndex  = -1;
+
+    if (getGplDebug() == 1) {
+      dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_VIEWPORT;
+      dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_SCISSOR;
+
+      if (state.useDynamicDepthBias())
+        dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_DEPTH_BIAS;
+
+      if (state.useDynamicDepthBounds())
+        dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_DEPTH_BOUNDS;
+
+      if (state.useDynamicBlendConstants())
+        dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_BLEND_CONSTANTS;
+
+      if (state.useDynamicStencilRef())
+        dynamicStates[dynamicStateCount++] = VK_DYNAMIC_STATE_STENCIL_REFERENCE;
+
+      dyInfo.dynamicStateCount = dynamicStateCount;
+      dyInfo.pDynamicStates    = dynamicStates.data();
+      info.pDynamicState       = &dyInfo;
+    }
+
+    if (getGplDebug() == 2)
+      info.flags |= VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT;
 
     auto t0 = dxvk::high_resolution_clock::now();
 
@@ -139,7 +193,7 @@ namespace dxvk {
     if (m_pipeMgr->m_gplStats.linked.fetch_add(1) == 0) {
       Logger::info(str::format("panDXVK gplasync: first pipeline linked from libraries in ",
         us / 1000.0, " ms, the library path works on this device (vs=",
-        m_shaders.vs->debugName(), ")"));
+        m_shaders.vs->debugName(), "), debug mode ", getGplDebug()));
     }
 
     if (m_pipeMgr->m_asyncLog) {
@@ -176,6 +230,9 @@ namespace dxvk {
 
     info.pNext = &libInfo;
     info.flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+
+    if (getGplDebug() == 2)
+      info.flags |= VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
 
     auto t0 = dxvk::high_resolution_clock::now();
 
@@ -445,6 +502,13 @@ namespace dxvk {
     if (pipeline == VK_NULL_HANDLE)
       return VK_NULL_HANDLE;
 
+    if (getGplDebug() == 3) {
+      keepShaderModule(std::move(vsm));
+      keepShaderModule(std::move(tcsm));
+      keepShaderModule(std::move(tesm));
+      keepShaderModule(std::move(gsm));
+    }
+
     m_preRasterLibs.push_back({ key, pipeline });
     created = true;
     return pipeline;
@@ -553,6 +617,9 @@ namespace dxvk {
 
     if (pipeline == VK_NULL_HANDLE)
       return VK_NULL_HANDLE;
+
+    if (getGplDebug() == 3)
+      keepShaderModule(std::move(fsm));
 
     m_fragmentShaderLibs.push_back({ key, pipeline });
     created = true;
