@@ -185,7 +185,7 @@ touch command lists, descriptors, semaphores or the submission queue, and they a
 joined before pipelines are destroyed. Not reviewed: the dxgi presenter and the
 locking inside `DxvkStateCache::addGraphicsPipeline`.
 
-### Fast link renders nothing on PanVK currently 
+### Fast link renders nothing with PanVK currently 
 
 With `PANDXVK_GPLASYNC=2` with AIO test it showed dxvk's hud but none of the
 scene, and the draw count stayed normal. No library or link failed.
