@@ -38,7 +38,6 @@ log (`PANDXVK_ASYNC_LOG=1`):
 | Hollow Knight Silksong | Mali-G52 MC2 | 61 | 21.8 s | 117 ms | 4.2 s | 247 / 50 |
 | Minutes Till Dawn | Mali-G57 MC2 | 23 | 1.3 s | 52 ms | 121 ms | 122 / 36 |
 | Hades | Mali-G57 MC2 | 4 | 0.25 s | 36 ms | 147 ms | 10 / 6 |
-| Keep Driving | Mali-G57 MC2 | 2 | 0.09 s | 50 ms | 50 ms | 10 / 9 |
 
 Without async, the same compiles run on the render thread. A separate Silksong run
 on the Mali-G52 MC2 with debug logging and no async measured 67 pipelines taking
