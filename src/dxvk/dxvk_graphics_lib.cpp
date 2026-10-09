@@ -31,7 +31,7 @@ namespace dxvk {
     int32_t getGplDebug() {
       static const int32_t value = [] () -> int32_t {
         std::string str = env::getEnvVar("PANDXVK_GPL_DEBUG");
-        return str.empty() ? 0 : int32_t(std::atoi(str.c_str()));
+        return str.empty() ? 2 : int32_t(std::atoi(str.c_str()));
       }();
 
       return value;
