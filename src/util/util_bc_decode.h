@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
+#include <atomic>
 
 #include "log/log.h"
 #include "util_string.h"
@@ -241,10 +242,14 @@ namespace dxvk::util {
   // ============================================================
   // Debug logging for BC7 decode (debug builds only)
   // ============================================================
+  // Atomic for the same reason as AstcEncodeStats: the band-parallel
+  // transcode in util_bc_to_astc.h reaches the decode from every worker
+  // at once. Counters only - the decoded texels never depend on them,
+  // so the transcoded output stays bit-exact either way.
   struct Bc7DecodeStats {
-    uint32_t modeCounts[8]    = {};  // How many blocks per mode
-    uint32_t unhandledBlocks  = 0;   // Blocks with unimplemented modes
-    uint32_t totalBlocks      = 0;
+    std::atomic<uint32_t> modeCounts[8]    = {};  // How many blocks per mode
+    std::atomic<uint32_t> unhandledBlocks  = { 0 };  // Blocks with unimplemented modes
+    std::atomic<uint32_t> totalBlocks      = { 0 };
 
     void reset() {
       for (int i = 0; i < 8; i++) modeCounts[i] = 0;

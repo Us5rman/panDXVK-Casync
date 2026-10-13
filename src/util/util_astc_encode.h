@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cassert>
 #include <algorithm>
+#include <atomic>
 
 #include "log/log.h"
 #include "util_string.h"
@@ -35,10 +36,14 @@ namespace dxvk::util {
    * reads as a measurement when it is a constant. Reintroduce one only
    * alongside a code path that can actually reach it.
    */
+  // Atomic because the band-parallel transcode in util_bc_to_astc.h
+  // increments these from every worker at once. They are pure counters:
+  // a lost update shifts a printed statistic and nothing else, because
+  // no output byte is ever derived from them.
   struct AstcEncodeStats {
-    uint32_t totalBlocks    = 0;
-    uint32_t uniformBlocks  = 0;
-    uint32_t directBlocks   = 0;  // CEM 12 (RGBA direct)
+    std::atomic<uint32_t> totalBlocks    = { 0 };
+    std::atomic<uint32_t> uniformBlocks  = { 0 };
+    std::atomic<uint32_t> directBlocks   = { 0 };  // CEM 12 (RGBA direct)
 
     void dump() const {
       // Logger::debug, not fprintf: the counters only matter when someone is
