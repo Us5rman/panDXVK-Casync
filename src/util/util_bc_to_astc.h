@@ -5,6 +5,8 @@
 #include <cstring>
 #include <algorithm>
 #include <memory>
+#include <thread>
+#include <vector>
 #include "../dxvk/dxvk_format.h"
 #include "util_env.h"
 #include "util_bc_decode.h"
@@ -306,60 +308,116 @@ namespace dxvk::util {
     if (dstRowPitch == 0)
       dstRowPitch = static_cast<VkDeviceSize>(blockWidth) * 16;
 
-    uint8_t decoded[64];    // one 4x4 RGBA8 block from the BC decoder
-    uint8_t encPixels[64];  // clamp-gathered input for the ASTC encoder
-    uint8_t astcBlock[16];
+    // panDXVK: band the block rows across worker threads.
+    //
+    // One 4x4 ASTC block is encoded from its own 16 decoded texels and
+    // written to its own 16 bytes, so block rows are independent and the
+    // split is bit-exact - the output bytes are identical to the serial
+    // loop. Measured on Mali-G52 (Gustave, v12 logs) this loop ran at
+    // 7-10 MB/s single threaded and was 95% (Silksong, BC7) and 99%
+    // (Nine Sols, BC3) of all transcode time, with the worst single
+    // texture holding the render thread for 5651ms.
+    //
+    // The three scratch buffers move INSIDE the band lambda. Declared at
+    // function scope they would be shared by every worker and the encode
+    // would race on them; per-band private copies keep each block seeing
+    // exactly the bytes it saw when the loop was serial.
+    auto encodeBand = [=] (uint32_t byBegin, uint32_t byEnd) {
+      uint8_t decoded[64];    // one 4x4 RGBA8 block from the BC decoder
+      uint8_t encPixels[64];  // clamp-gathered input for the ASTC encoder
+      uint8_t astcBlock[16];
 
-    for (uint32_t by = 0; by < blockHeight; by++) {
-      for (uint32_t bx = 0; bx < blockWidth; bx++) {
-        const uint8_t* srcBlock = srcData
-          + static_cast<VkDeviceSize>(by) * srcBlockPitch
-          + static_cast<VkDeviceSize>(bx) * blockSizeBytes;
+      for (uint32_t by = byBegin; by < byEnd; by++) {
+        for (uint32_t bx = 0; bx < blockWidth; bx++) {
+          const uint8_t* srcBlock = srcData
+            + static_cast<VkDeviceSize>(by) * srcBlockPitch
+            + static_cast<VkDeviceSize>(bx) * blockSizeBytes;
 
-        decodeBcBlock(bc, srcBlock, decoded, bc6hSigned);
+          decodeBcBlock(bc, srcBlock, decoded, bc6hSigned);
 
-        // Gather with clamp-to-edge. Interior blocks (the common case)
-        // encode straight from the decoded pixels; edge blocks replicate
-        // the border pixel exactly like encodeAstcImage4x4's gather.
-        const uint8_t* encSrc = decoded;
-        if (bx * 4 + 4 > width || by * 4 + 4 > height) {
-          for (uint32_t py = 0; py < 4; py++) {
-            const uint32_t cy = std::min(by * 4 + py, height - 1) - by * 4;
-            for (uint32_t px = 0; px < 4; px++) {
-              const uint32_t cx = std::min(bx * 4 + px, width - 1) - bx * 4;
-              const uint32_t s = (cy * 4 + cx) * 4;
-              const uint32_t d = (py * 4 + px) * 4;
-              encPixels[d + 0] = decoded[s + 0];
-              encPixels[d + 1] = decoded[s + 1];
-              encPixels[d + 2] = decoded[s + 2];
-              encPixels[d + 3] = decoded[s + 3];
+          // Gather with clamp-to-edge. Interior blocks (the common case)
+          // encode straight from the decoded pixels; edge blocks replicate
+          // the border pixel exactly like encodeAstcImage4x4's gather.
+          const uint8_t* encSrc = decoded;
+          if (bx * 4 + 4 > width || by * 4 + 4 > height) {
+            for (uint32_t py = 0; py < 4; py++) {
+              const uint32_t cy = std::min(by * 4 + py, height - 1) - by * 4;
+              for (uint32_t px = 0; px < 4; px++) {
+                const uint32_t cx = std::min(bx * 4 + px, width - 1) - bx * 4;
+                const uint32_t s = (cy * 4 + cx) * 4;
+                const uint32_t d = (py * 4 + px) * 4;
+                encPixels[d + 0] = decoded[s + 0];
+                encPixels[d + 1] = decoded[s + 1];
+                encPixels[d + 2] = decoded[s + 2];
+                encPixels[d + 3] = decoded[s + 3];
+              }
             }
+            encSrc = encPixels;
           }
-          encSrc = encPixels;
-        }
 
-        // SNORM→UNORM remap for BC4/BC5 SNORM. BC4_SNORM stores signed
-        // normalized values ([-1,1]) as uint8 bytes in R; BC5_SNORM in
-        // R and G. ASTC is UNORM-only: unorm = (int8_t)snorm + 128.
-        // Per-pixel function, so remap-after-gather == remap-then-gather.
-        if (remapR || remapG) {
-          if (encSrc != encPixels)
-            std::memcpy(encPixels, decoded, sizeof(encPixels));
-          for (uint32_t i = 0; i < 16; i++) {
-            uint8_t* px = encPixels + i * 4;
-            if (remapR)
-              px[0] = static_cast<uint8_t>(static_cast<int8_t>(px[0]) + 128);
-            if (remapG)
-              px[1] = static_cast<uint8_t>(static_cast<int8_t>(px[1]) + 128);
+          // SNORM→UNORM remap for BC4/BC5 SNORM. BC4_SNORM stores signed
+          // normalized values ([-1,1]) as uint8 bytes in R; BC5_SNORM in
+          // R and G. ASTC is UNORM-only: unorm = (int8_t)snorm + 128.
+          // Per-pixel function, so remap-after-gather == remap-then-gather.
+          if (remapR || remapG) {
+            if (encSrc != encPixels)
+              std::memcpy(encPixels, decoded, sizeof(encPixels));
+            for (uint32_t i = 0; i < 16; i++) {
+              uint8_t* px = encPixels + i * 4;
+              if (remapR)
+                px[0] = static_cast<uint8_t>(static_cast<int8_t>(px[0]) + 128);
+              if (remapG)
+                px[1] = static_cast<uint8_t>(static_cast<int8_t>(px[1]) + 128);
+            }
+            encSrc = encPixels;
           }
-          encSrc = encPixels;
-        }
 
-        encodeAstcBlock4x4(encSrc, astcBlock);
-        std::memcpy(
-          dstData + static_cast<VkDeviceSize>(by) * dstRowPitch + bx * 16,
-          astcBlock, sizeof(astcBlock));
+          encodeAstcBlock4x4(encSrc, astcBlock);
+          std::memcpy(
+            dstData + static_cast<VkDeviceSize>(by) * dstRowPitch + bx * 16,
+            astcBlock, sizeof(astcBlock));
+        }
       }
+    };
+
+    const VkDeviceSize totalBlocks =
+      static_cast<VkDeviceSize>(blockWidth) * blockHeight;
+
+    // Small mips stay serial. Below ~4096 blocks the spawn and join cost
+    // more than the work they would overlap, so the common tiny-mip case
+    // pays nothing for this change. Deliberately an if/else and not an
+    // early return: the periodic stats dumps below must still run for
+    // serial mips or their counters stop advancing and the 1000/10000
+    // block dump periods stop being honest.
+    if (blockHeight < 32 || totalBlocks < 4096) {
+      encodeBand(0, blockHeight);
+    } else {
+      uint32_t threadCount = std::thread::hardware_concurrency();
+
+      if (threadCount < 2)
+        threadCount = 2;
+      if (threadCount > 8)
+        threadCount = 8;
+      if (threadCount > blockHeight)
+        threadCount = blockHeight;
+
+      const uint32_t rowsPerBand = (blockHeight + threadCount - 1) / threadCount;
+
+      std::vector<std::thread> workers;
+      workers.reserve(threadCount);
+
+      for (uint32_t t = 0; t < threadCount; t++) {
+        const uint32_t byBegin = t * rowsPerBand;
+
+        if (byBegin >= blockHeight)
+          break;
+
+        workers.emplace_back(encodeBand, byBegin,
+          std::min(byBegin + rowsPerBand, blockHeight));
+      }
+
+      for (auto& worker : workers)
+        worker.join();
     }
 
     // Periodic stats dumps. This is the one function both callers reach —
