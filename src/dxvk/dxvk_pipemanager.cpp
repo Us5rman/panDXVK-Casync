@@ -126,41 +126,6 @@ namespace dxvk {
   }
 
 
-  DxvkPipelineManager::~DxvkPipelineManager() = default;
-
-
-  DxvkComputePipeline* DxvkPipelineManager::createComputePipeline(
-          const DxvkComputePipelineShaders& shaders) {
-    return shaders.cs == nullptr
-      ? nullptr
-      : findOrCreateComputePipeline(shaders);
-  }
-
-
-  DxvkComputePipeline* DxvkPipelineManager::findOrCreateComputePipeline(
-          const DxvkComputePipelineShaders& shaders) {
-    std::lock_guard<dxvk::mutex> lock(m_mutex);
-
-    return &m_computePipelines.try_emplace(shaders, this, shaders).first->second;
-  }
-
-
-  DxvkGraphicsPipeline* DxvkPipelineManager::createGraphicsPipeline(
-          const DxvkGraphicsPipelineShaders& shaders) {
-    return shaders.vs == nullptr
-      ? nullptr
-      : findOrCreateGraphicsPipeline(shaders);
-  }
-
-
-  DxvkGraphicsPipeline* DxvkPipelineManager::findOrCreateGraphicsPipeline(
-          const DxvkGraphicsPipelineShaders& shaders) {
-    std::lock_guard<dxvk::mutex> lock(m_mutex);
-
-    return &m_graphicsPipelines.try_emplace(shaders, this, shaders).first->second;
-  }
-
-
   void DxvkPipelineManager::registerShader(
           const Rc<DxvkShader>& shader) {
     switch (m_stateCache != nullptr) {
