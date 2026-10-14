@@ -1,3 +1,4 @@
+option('enable_tests', type : 'boolean', value : false)
 option('enable_dxgi',  type : 'boolean', value : true, description: 'Build DXGI')
 option('enable_ddraw', type : 'boolean', value : true, description: 'Build DDRAW')
 option('enable_d3d8',  type : 'boolean', value : true, description: 'Build D3D8')
