@@ -68,9 +68,13 @@ namespace dxvk {
     }
     
     Com& operator = (T* object) {
-      this->decRef();
-      m_ptr = object;
-      this->incRef();
+      // prevents the destruction of private
+      // Com objects during self-assignment
+      if (likely(m_ptr != object)) {
+        this->decRef();
+        m_ptr = object;
+        this->incRef();
+      }
       return *this;
     }
     
@@ -115,6 +119,10 @@ namespace dxvk {
     
     bool operator == (std::nullptr_t) const { return m_ptr == nullptr; }
     bool operator != (std::nullptr_t) const { return m_ptr != nullptr; }
+
+    explicit operator bool () const {
+      return m_ptr != nullptr;
+    }
     
     T* ref() const {
       return dxvk::ref(m_ptr);

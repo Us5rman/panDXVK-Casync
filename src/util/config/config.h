@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-
+#include <cmath>
 #include <string>
 #include <unordered_map>
 
@@ -124,6 +124,10 @@ namespace dxvk {
     static bool parseOptionValue(
       const std::string&  value,
             int32_t&      result);
+
+    static bool parseOptionValue(
+      const std::string&  value,
+            float&        result);
     
     static bool parseOptionValue(
       const std::string&  value,

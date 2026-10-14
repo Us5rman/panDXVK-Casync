@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include "d3d9_device_child.h"
 #include "d3d9_device.h"
 #include "d3d9_format.h"
@@ -10,11 +12,15 @@
 
 #include "../util/sync/sync_signal.h"
 
+#include "../wsi/wsi_window.h"
+#include "../wsi/wsi_monitor.h"
+
 #include <vector>
 
 namespace dxvk {
 
   class D3D9Surface;
+  class FramePacer;
 
   using D3D9SwapChainExBase = D3D9DeviceChild<IDirect3DSwapChain9Ex>;
   class D3D9SwapChainEx final : public D3D9SwapChainExBase {
@@ -78,18 +84,13 @@ namespace dxvk {
 
     void SyncFrameLatency();
 
+    void UpdateTargetFrameRate(UINT SyncInterval);
+
   private:
 
     enum BindingIds : uint32_t {
       Image = 0,
       Gamma = 1,
-    };
-
-    
-    struct WindowState {
-      LONG style   = 0;
-      LONG exstyle = 0;
-      RECT rect    = { 0, 0, 0, 0 };
     };
 
     D3DPRESENT_PARAMETERS     m_presentParams;
@@ -104,7 +105,7 @@ namespace dxvk {
     Rc<hud::Hud>              m_hud;
 
     std::vector<Com<D3D9Surface, false>> m_backBuffers;
-    
+
     RECT                      m_srcRect;
     RECT                      m_dstRect;
 
@@ -117,6 +118,8 @@ namespace dxvk {
     uint32_t                  m_frameLatencyCap   = 0;
     Rc<sync::Fence>           m_frameLatencySignal;
 
+    std::unique_ptr<FramePacer> m_framePacer;
+
     bool                      m_dirty    = true;
     bool                      m_vsync    = true;
 
@@ -126,9 +129,10 @@ namespace dxvk {
     HWND                      m_window   = nullptr;
     HMONITOR                  m_monitor  = nullptr;
 
-    WindowState               m_windowState;
+    wsi::DxvkWindowState      m_windowState;
 
     double                    m_displayRefreshRate = 0.0;
+    double                    m_targetFrameRate    = 0.0;
 
     void PresentImage(UINT PresentInterval);
 
@@ -159,11 +163,11 @@ namespace dxvk {
     uint32_t PickFormats(
             D3D9Format                Format,
             VkSurfaceFormatKHR*       pDstFormats);
-    
+
     uint32_t PickPresentModes(
             BOOL                      Vsync,
             VkPresentModeKHR*         pDstModes);
-    
+
     uint32_t PickImageCount(
             UINT                      Preferred);
 
@@ -175,13 +179,13 @@ namespace dxvk {
     HRESULT EnterFullscreenMode(
             D3DPRESENT_PARAMETERS*  pPresentParams,
       const D3DDISPLAYMODEEX*       pFullscreenDisplayMode);
-    
+
     HRESULT LeaveFullscreenMode();
-    
+
     HRESULT ChangeDisplayMode(
             D3DPRESENT_PARAMETERS*  pPresentParams,
       const D3DDISPLAYMODEEX*       pFullscreenDisplayMode);
-    
+
     HRESULT RestoreDisplayMode(HMONITOR hMonitor);
 
     bool    UpdatePresentRegion(const RECT* pSourceRect, const RECT* pDestRect);

@@ -14,6 +14,7 @@
 namespace dxvk {
 
   class D3D9DeviceEx;
+  class DxvkDevice;
   class SpirvModule;
 
   struct D3D9Options;
@@ -37,10 +38,17 @@ namespace dxvk {
   };
 
   struct D3D9FixedFunctionOptions {
-    D3D9FixedFunctionOptions(const D3D9Options* options);
+    D3D9FixedFunctionOptions(const Rc<DxvkDevice>& device, const D3D9Options* options);
 
-    bool invariantPosition;
+    bool    invariantPosition;
+    bool splitSamplerSlots;
+    int32_t drefScaling;
+    bool    enableClipDistance;
   };
+
+  constexpr float GetDrefScaleFactor(int32_t bitDepth) {
+    return 1.0f / (float(1 << bitDepth) - 1.0f);
+  }
 
   // Returns new oFog if VS
   // Returns new oColor if PS
@@ -105,6 +113,10 @@ namespace dxvk {
         uint32_t TransformFlags : 24;
 
         uint32_t LightCount : 4;
+        uint32_t SpecularEnabled : 1;
+
+        uint32_t UseLegacyLights : 1;
+        uint32_t AlternatePixelCenter : 1;
 
         uint32_t TexcoordDeclMask : 24;
         uint32_t HasFog : 1;
@@ -149,11 +161,18 @@ namespace dxvk {
         uint32_t     Projected    : 1;
 
         uint32_t     ProjectedCount : 3;
+        uint32_t     SampleDref     : 1;
 
         // Included in here, read from Stage 0 for packing reasons
         // Affects all stages.
         uint32_t     GlobalSpecularEnable : 1;
         uint32_t     GlobalFlatShade      : 1;
+
+        uint32_t     AddressU        : 3;
+        uint32_t     AddressV        : 3;
+        uint32_t     ColorKeyEnable  : 1;
+        uint32_t     ColorKeyLow     : 32;
+        uint32_t     ColorKeyHigh    : 32;
       } Contents;
 
       uint32_t Primitive[2];

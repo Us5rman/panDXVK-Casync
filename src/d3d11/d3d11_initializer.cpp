@@ -17,7 +17,7 @@ namespace dxvk {
       m_device->createCommandList());
   }
 
-  
+
   D3D11Initializer::~D3D11Initializer() {
 
   }
@@ -33,13 +33,15 @@ namespace dxvk {
   void D3D11Initializer::InitBuffer(
           D3D11Buffer*                pBuffer,
     const D3D11_SUBRESOURCE_DATA*     pInitialData) {
-    VkMemoryPropertyFlags memFlags = pBuffer->GetBuffer()->memFlags();
+    if (!(pBuffer->Desc()->MiscFlags & D3D11_RESOURCE_MISC_TILED)) {
+      VkMemoryPropertyFlags memFlags = pBuffer->GetBuffer()->memFlags();
 
-    (memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
-      ? InitHostVisibleBuffer(pBuffer, pInitialData)
-      : InitDeviceLocalBuffer(pBuffer, pInitialData);
+      (memFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+        ? InitHostVisibleBuffer(pBuffer, pInitialData)
+        : InitDeviceLocalBuffer(pBuffer, pInitialData);
+    }
   }
-  
+
 
   void D3D11Initializer::InitTexture(
           D3D11CommonTexture*         pTexture,
@@ -79,7 +81,7 @@ namespace dxvk {
     if (pInitialData != nullptr && pInitialData->pSysMem != nullptr) {
       m_transferMemory   += bufferSlice.length();
       m_transferCommands += 1;
-      
+
       m_context->uploadBuffer(
         bufferSlice.buffer(),
         pInitialData->pSysMem);
@@ -119,7 +121,7 @@ namespace dxvk {
           D3D11CommonTexture*         pTexture,
     const D3D11_SUBRESOURCE_DATA*     pInitialData) {
     std::lock_guard<dxvk::mutex> lock(m_mutex);
-    
+
     Rc<DxvkImage> image = pTexture->GetImage();
 
     auto mapMode = pTexture->GetMapMode();
@@ -261,7 +263,7 @@ namespace dxvk {
     } else {
       if (mapMode != D3D11_COMMON_TEXTURE_MAP_MODE_STAGING) {
         m_transferCommands += 1;
-        
+
         // While the Microsoft docs state that resource contents are
         // undefined if no initial data is provided, some applications
         // expect a resource to be pre-cleared.
@@ -336,7 +338,7 @@ namespace dxvk {
     std::lock_guard<dxvk::mutex> lock(m_mutex);
 
     VkImageSubresourceRange subresources = image->getAvailableSubresources();
-    
+
     m_context->initImage(image, subresources, VK_IMAGE_LAYOUT_PREINITIALIZED);
 
     m_transferCommands += 1;
@@ -353,7 +355,7 @@ namespace dxvk {
 
   void D3D11Initializer::FlushInternal() {
     m_context->flushCommandList();
-    
+
     m_transferCommands = 0;
     m_transferMemory   = 0;
   }

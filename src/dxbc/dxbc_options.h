@@ -48,6 +48,23 @@ namespace dxvk {
     /// with storage buffers for tight bounds checking
     bool dynamicIndexedConstantBufferAsSsbo = false;
 
+    /// Enable clip-distance builtins only if the Vulkan device
+    /// actually enabled the corresponding feature.
+    bool enableClipDistance = false;
+
+    /// Enable cull-distance builtins only if the Vulkan device
+    /// actually enabled the corresponding feature.
+    bool enableCullDistance = false;
+
+    /// Disable unbound texture optimization on Mali GPUs
+    /// to prevent black screen issues due to strict binding validation
+    bool disableUnboundTextureOptimization = false;
+
+    /// Use a Taylor approximation for sin/cos instead of the
+    /// native GLSL.std.450 Sin/Cos instructions.  Required for
+    /// correct results on Intel iGPUs (dxvk #4866).
+    bool sincosEmulation = false;
+
     /// Clear thread-group shared memory to zero
     bool zeroInitWorkgroupMemory = false;
 
@@ -66,5 +83,5 @@ namespace dxvk {
     /// Minimum storage buffer alignment
     VkDeviceSize minSsboAlignment = 0;
   };
-  
+
 }

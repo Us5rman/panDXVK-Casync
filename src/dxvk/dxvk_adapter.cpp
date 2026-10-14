@@ -8,7 +8,7 @@
 #include "../util/util_env.h"
 
 namespace dxvk {
-  
+
   DxvkAdapter::DxvkAdapter(
     const Rc<vk::InstanceFn>& vki,
           VkPhysicalDevice    handle)
@@ -22,13 +22,13 @@ namespace dxvk {
 
     m_hasMemoryBudget = m_deviceExtensions.supports(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
   }
-  
-  
+
+
   DxvkAdapter::~DxvkAdapter() {
-    
+
   }
-  
-  
+
+
   DxvkAdapterMemoryInfo DxvkAdapter::getMemoryHeapInfo() const {
     VkPhysicalDeviceMemoryBudgetPropertiesEXT memBudget = { };
     memBudget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
@@ -39,7 +39,7 @@ namespace dxvk {
     memProps.pNext = m_hasMemoryBudget ? &memBudget : nullptr;
 
     m_vki->vkGetPhysicalDeviceMemoryProperties2(m_handle, &memProps);
-    
+
     DxvkAdapterMemoryInfo info = { };
     info.heapCount = memProps.memoryProperties.memoryHeapCount;
 
@@ -64,15 +64,15 @@ namespace dxvk {
     m_vki->vkGetPhysicalDeviceMemoryProperties(m_handle, &memoryProperties);
     return memoryProperties;
   }
-  
-  
+
+
   VkFormatProperties DxvkAdapter::formatProperties(VkFormat format) const {
     VkFormatProperties formatProperties;
     m_vki->vkGetPhysicalDeviceFormatProperties(m_handle, format, &formatProperties);
     return formatProperties;
   }
-  
-    
+
+
   VkResult DxvkAdapter::imageFormatProperties(
     VkFormat                  format,
     VkImageType               type,
@@ -83,27 +83,27 @@ namespace dxvk {
     return m_vki->vkGetPhysicalDeviceImageFormatProperties(
       m_handle, format, type, tiling, usage, flags, &properties);
   }
-  
-    
+
+
   DxvkAdapterQueueIndices DxvkAdapter::findQueueFamilies() const {
     uint32_t graphicsQueue = findQueueFamily(
       VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT,
       VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT);
-    
+
     uint32_t computeQueue = findQueueFamily(
       VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT,
       VK_QUEUE_COMPUTE_BIT);
-    
+
     if (computeQueue == VK_QUEUE_FAMILY_IGNORED)
       computeQueue = graphicsQueue;
 
     uint32_t transferQueue = findQueueFamily(
       VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT,
       VK_QUEUE_TRANSFER_BIT);
-    
+
     if (transferQueue == VK_QUEUE_FAMILY_IGNORED)
       transferQueue = computeQueue;
-    
+
     DxvkAdapterQueueIndices queues;
     queues.graphics = graphicsQueue;
     queues.transfer = transferQueue;
@@ -273,8 +273,8 @@ namespace dxvk {
         && (m_deviceFeatures.khrTimelineSemaphore.timelineSemaphore
                 || !required.khrTimelineSemaphore.timelineSemaphore);
   }
-  
-  
+
+
   void DxvkAdapter::enableExtensions(const DxvkNameSet& extensions) {
     m_extraExtensions.merge(extensions);
   }
@@ -347,6 +347,23 @@ namespace dxvk {
       devExtensions.khrPipelineLibrary.setMode(DxvkExtMode::Disabled);
     }
 
+    // Diagnostic mode. Every extension used here is optional, so a device
+    // is created on nearly any implementation and anything missing shows
+    // up later as incorrect rendering rather than a failure. Promoting the
+    // optional ones to required makes extension negotiation name each
+    // unsupported extension and refuse the device, which answers whether a
+    // report belongs to us or to the driver. Passive and disabled
+    // extensions keep their mode: nothing relies on them, so failing a
+    // device over one would report nothing useful.
+    if (env::getEnvVar("DXVK_SAREK_STRICT") == "1") {
+      Logger::warn("DxvkAdapter: Strict mode, optional extensions are required");
+
+      for (auto* ext : devExtensionList) {
+        if (ext->mode() == DxvkExtMode::Optional)
+          ext->setMode(DxvkExtMode::Required);
+      }
+    }
+
     DxvkNameSet extensionsEnabled;
 
     if (!m_deviceExtensions.enableExtensions(
@@ -354,7 +371,7 @@ namespace dxvk {
           devExtensionList.data(),
           extensionsEnabled))
       throw DxvkError("DxvkAdapter: Failed to create device");
-    
+
     // Enable additional extensions if necessary
     extensionsEnabled.merge(m_extraExtensions);
     DxvkNameList extensionNameList = extensionsEnabled.toNameList();
@@ -428,6 +445,7 @@ namespace dxvk {
     Logger::info("Enabled device extensions:");
     this->logNameList(extensionNameList);
     this->logFeatures(enabledFeatures);
+    this->logDegradation(enabledFeatures);
 
     // Create pNext chain for additional device features
     enabledFeatures.core.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR;
@@ -511,7 +529,7 @@ namespace dxvk {
     overallocInfo.sType = VK_STRUCTURE_TYPE_DEVICE_MEMORY_OVERALLOCATION_CREATE_INFO_AMD;
     overallocInfo.pNext = nullptr;
     overallocInfo.overallocationBehavior = VK_MEMORY_OVERALLOCATION_BEHAVIOR_ALLOWED_AMD;
-    
+
     // Create the requested queues
     float queuePriority = 1.0f;
     std::vector<VkDeviceQueueCreateInfo> queueInfos;
@@ -522,7 +540,7 @@ namespace dxvk {
     queueFamiliySet.insert(queueFamilies.graphics);
     queueFamiliySet.insert(queueFamilies.transfer);
     this->logQueueFamilies(queueFamilies);
-    
+
     for (uint32_t family : queueFamiliySet) {
       VkDeviceQueueCreateInfo graphicsQueue;
       graphicsQueue.sType             = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -548,7 +566,7 @@ namespace dxvk {
 
     if (devExtensions.amdMemoryOverallocationBehaviour)
       overallocInfo.pNext = std::exchange(info.pNext, &overallocInfo);
-    
+
     VkDevice device = VK_NULL_HANDLE;
     VkResult vr = m_vki->vkCreateDevice(m_handle, &info, nullptr, &device);
 
@@ -576,15 +594,15 @@ namespace dxvk {
 
     if (vr != VK_SUCCESS)
       throw DxvkError("DxvkAdapter: Failed to create device");
-    
+
     Rc<DxvkDevice> result = new DxvkDevice(instance, this,
-      new vk::DeviceFn(true, m_vki->instance(), device),
+      new vk::DeviceFn(m_vki, true, device),
       devExtensions, enabledFeatures);
     result->initResources();
     return result;
   }
-  
-  
+
+
   void DxvkAdapter::notifyHeapMemoryAlloc(
           uint32_t            heap,
           VkDeviceSize        bytes) {
@@ -592,7 +610,7 @@ namespace dxvk {
       m_heapAlloc[heap] += bytes;
   }
 
-  
+
   void DxvkAdapter::notifyHeapMemoryFree(
           uint32_t            heap,
           VkDeviceSize        bytes) {
@@ -615,12 +633,18 @@ namespace dxvk {
 
     return driverMatches;
   }
-  
-  
+
+
+  bool DxvkAdapter::matchesDriver(
+          VkDriverIdKHR       driver) const {
+    return driver == m_deviceInfo.khrDeviceDriverProperties.driverID;
+  }
+
+
   void DxvkAdapter::logAdapterInfo() const {
     VkPhysicalDeviceProperties deviceInfo = this->deviceProperties();
     VkPhysicalDeviceMemoryProperties memoryInfo = this->memoryProperties();
-    
+
     Logger::info(str::format(deviceInfo.deviceName, ":"));
     Logger::info(str::format("  Driver: ",
       VK_VERSION_MAJOR(deviceInfo.driverVersion), ".",
@@ -633,11 +657,11 @@ namespace dxvk {
 
     for (uint32_t i = 0; i < memoryInfo.memoryHeapCount; i++) {
       constexpr VkDeviceSize mib = 1024 * 1024;
-      
+
       Logger::info(str::format("  Memory Heap[", i, "]: "));
       Logger::info(str::format("    Size: ", memoryInfo.memoryHeaps[i].size / mib, " MiB"));
       Logger::info(str::format("    Flags: ", "0x", std::hex, memoryInfo.memoryHeaps[i].flags));
-      
+
       for (uint32_t j = 0; j < memoryInfo.memoryTypeCount; j++) {
         if (memoryInfo.memoryTypes[j].heapIndex == i) {
           Logger::info(str::format(
@@ -647,19 +671,19 @@ namespace dxvk {
       }
     }
   }
-  
-  
+
+
   bool DxvkAdapter::isUnifiedMemoryArchitecture() const {
     auto memory = this->memoryProperties();
     bool result = true;
 
     for (uint32_t i = 0; i < memory.memoryHeapCount; i++)
-      result &= memory.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+      result = result && (memory.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT);
 
     return result;
   }
-  
-  
+
+
   void DxvkAdapter::initHeapAllocInfo() {
     for (uint32_t i = 0; i < m_heapAlloc.size(); i++)
       m_heapAlloc[i] = 0;
@@ -737,7 +761,7 @@ namespace dxvk {
 
     // Query full device properties for all enabled extensions
     m_vki->vkGetPhysicalDeviceProperties2(m_handle, &m_deviceInfo.core);
-    
+
     // Some drivers reports the driver version in a slightly different format
     switch (m_deviceInfo.khrDeviceDriverProperties.driverID) {
       case VK_DRIVER_ID_NVIDIA_PROPRIETARY:
@@ -821,9 +845,21 @@ namespace dxvk {
       m_deviceFeatures.extTransformFeedback.pNext = std::exchange(m_deviceFeatures.core.pNext, &m_deviceFeatures.extTransformFeedback);
     }
 
-    if (m_deviceExtensions.supports(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME) >= 3) {
+    uint32_t divisorRevision = m_deviceExtensions.supports(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
+
+    if (divisorRevision >= 3) {
       m_deviceFeatures.extVertexAttributeDivisor.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_EXT;
       m_deviceFeatures.extVertexAttributeDivisor.pNext = std::exchange(m_deviceFeatures.core.pNext, &m_deviceFeatures.extVertexAttributeDivisor);
+    } else if (divisorRevision) {
+      // Revisions 1 and 2 have no feature struct at all: supporting the
+      // extension is the capability, driven by the pipeline struct alone,
+      // and only the zero divisor is added in revision 3. Without this the
+      // bit reads zero on those drivers and the pipeline code drops the
+      // divisor struct, silently ignoring instance divisors on hardware
+      // that handles them. Nothing is chained here, so these values are
+      // not overwritten by the feature query that follows.
+      m_deviceFeatures.extVertexAttributeDivisor.vertexAttributeInstanceRateDivisor = VK_TRUE;
+      m_deviceFeatures.extVertexAttributeDivisor.vertexAttributeInstanceRateZeroDivisor = VK_FALSE;
     }
 
     if (m_deviceExtensions.supports(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) {
@@ -865,7 +901,7 @@ namespace dxvk {
     uint32_t numQueueFamilies = 0;
     m_vki->vkGetPhysicalDeviceQueueFamilyProperties(
       m_handle, &numQueueFamilies, nullptr);
-    
+
     m_queueFamilies.resize(numQueueFamilies);
     m_vki->vkGetPhysicalDeviceQueueFamilyProperties(
       m_handle, &numQueueFamilies, m_queueFamilies.data());
@@ -882,8 +918,72 @@ namespace dxvk {
 
     return VK_QUEUE_FAMILY_IGNORED;
   }
-  
-  
+
+
+  // Features with no working fallback. Each is emulated or ignored when
+  // missing, so the device still runs but draws something other than what
+  // the application asked for. The text names the symptom rather than the
+  // extension, so a screenshot in a report can be matched against the log
+  // without knowing any Vulkan. Filled through a reference because the
+  // list type cannot be copied or moved out of a function.
+  static void degradedFeatureList(
+    const DxvkDeviceFeatures&           features,
+          small_vector<const char*, 8>& result) {
+    if (!features.extCustomBorderColor.customBorderColorWithoutFormat)
+      result.push_back("Custom border colors unsupported. Border addressing "
+        "falls back to transparent black: wrong colors along texture edges, "
+        "dark seams on decals and terrain.");
+
+    if (!features.extDepthClipEnable.depthClipEnable)
+      result.push_back("Depth clip control unsupported. Clipping is "
+        "approximated by depth clamping: geometry that should be cut at the "
+        "near plane is stretched or missing.");
+
+    if (!features.extTransformFeedback.transformFeedback)
+      result.push_back("Transform feedback unsupported. D3D11 stream output "
+        "and D3D9 ProcessVertices are unavailable: missing particles, grass "
+        "or skinned geometry.");
+
+    if (!features.extVertexAttributeDivisor.vertexAttributeInstanceRateDivisor)
+      result.push_back("Vertex attribute divisor unsupported. Instance "
+        "divisors are ignored: instanced geometry drawn at wrong positions "
+        "or collapsed onto a single instance.");
+
+    if (!features.extNonSeamlessCubeMap.nonSeamlessCubeMap)
+      result.push_back("Non-seamless cube maps unsupported. D3D9 cube map "
+        "edges are filtered seamlessly: reflections differ from the "
+        "reference at face boundaries.");
+
+    if (!features.core.features.depthBounds)
+      result.push_back("Depth bounds test unsupported. The test is ignored: "
+        "light volumes and decals may bleed past their intended bounds.");
+  }
+
+
+  bool DxvkAdapter::hasDegradedFeatures(const DxvkDeviceFeatures& features) {
+    small_vector<const char*, 8> issues;
+    degradedFeatureList(features, issues);
+    return issues.size() != 0;
+  }
+
+
+  void DxvkAdapter::logDegradation(const DxvkDeviceFeatures& features) {
+    small_vector<const char*, 8> issues;
+    degradedFeatureList(features, issues);
+
+    if (!issues.size()) {
+      Logger::info("Degraded features: none");
+      return;
+    }
+
+    Logger::warn(str::format("Degraded features: ", issues.size(),
+      " unsupported, rendering may be incorrect:"));
+
+    for (size_t i = 0; i < issues.size(); i++)
+      Logger::warn(str::format("  ", issues[i]));
+  }
+
+
   void DxvkAdapter::logNameList(const DxvkNameList& names) {
     for (uint32_t i = 0; i < names.count(); i++)
       Logger::info(str::format("  ", names.name(i)));
@@ -965,5 +1065,5 @@ namespace dxvk {
       "\n  Graphics : ", queues.graphics,
       "\n  Transfer : ", queues.transfer));
   }
-  
+
 }

@@ -7,16 +7,20 @@
 #include "dxvk_openxr.h"
 #include "dxvk_platform_exts.h"
 
+#include "../wsi/wsi_platform.h"
+
 #include <algorithm>
 
 namespace dxvk {
-  
+
   DxvkInstance::DxvkInstance() {
     Logger::info(str::format("Game: ", env::getExeName()));
     // panDXVK: label this as panDXVK (not DXVK) and carry the release
     // identifier plus the commit, e.g. "panDXVK: 1.10.3.v8 (2c575a3)".
     Logger::info(str::format("panDXVK: ", util::panDxvkVersionString()));
     Logger::info(str::format("DXVK: ", DXVK_VERSION));
+
+    wsi::init();
 
     m_config = Config::getUserConfig();
     m_config.merge(Config::getAppConfig(env::getExePath()));
@@ -36,7 +40,9 @@ namespace dxvk {
       provider->initInstanceExtensions();
 
     m_vkl = new vk::LibraryFn();
-    m_vki = new vk::InstanceFn(true, this->createInstance());
+    if (!m_vkl->valid())
+      throw DxvkError("Failed to load vulkan-1 library.");
+    m_vki = new vk::InstanceFn(m_vkl, true, this->createInstance());
 
     m_adapters = this->queryAdapters();
 
@@ -50,13 +56,13 @@ namespace dxvk {
       }
     }
   }
-  
-  
+
+
   DxvkInstance::~DxvkInstance() {
-    
+    wsi::quit();
   }
-  
-  
+
+
   Rc<DxvkAdapter> DxvkInstance::enumAdapters(uint32_t index) const {
     return index < m_adapters.size()
       ? m_adapters[index]
@@ -75,7 +81,7 @@ namespace dxvk {
     return nullptr;
   }
 
-  
+
   Rc<DxvkAdapter> DxvkInstance::findAdapterByDeviceId(uint16_t vendorId, uint16_t deviceId) const {
     for (const auto& adapter : m_adapters) {
       const auto& props = adapter->deviceProperties();
@@ -87,8 +93,8 @@ namespace dxvk {
 
     return nullptr;
   }
-  
-  
+
+
   VkInstance DxvkInstance::createInstance() {
     DxvkInstanceExtensions insExtensions;
 
@@ -99,7 +105,7 @@ namespace dxvk {
 
     // Hide VK_EXT_debug_utils behind an environment variable. This extension
     // adds additional overhead to winevulkan
-    if ((env::getEnvVar("DXVK_PERF_EVENTS") == "1") || 
+    if ((env::getEnvVar("DXVK_PERF_EVENTS") == "1") ||
       (m_options.enableDebugUtils)) {
         insExtensionList.push_back(&insExtensions.extDebugUtils);
         Logger::warn("DXVK: Debug Utils are enabled, perf events are ON. May affect performance!");
@@ -107,7 +113,7 @@ namespace dxvk {
 
     DxvkNameSet extensionsEnabled;
     DxvkNameSet extensionsAvailable = DxvkNameSet::enumInstanceExtensions(m_vkl);
-    
+
     if (!extensionsAvailable.enableExtensions(
           insExtensionList.size(),
           insExtensionList.data(),
@@ -121,21 +127,21 @@ namespace dxvk {
       extensionsEnabled.merge(provider->getInstanceExtensions());
 
     DxvkNameList extensionNameList = extensionsEnabled.toNameList();
-    
+
     Logger::info("Enabled instance extensions:");
     this->logNameList(extensionNameList);
 
     std::string appName = env::getExeName();
-    
+
     VkApplicationInfo appInfo;
     appInfo.sType                 = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pNext                 = nullptr;
     appInfo.pApplicationName      = appName.c_str();
     appInfo.applicationVersion    = 0;
     appInfo.pEngineName           = "DXVK";
-    appInfo.engineVersion         = VK_MAKE_VERSION(1, 10, 3);
+    appInfo.engineVersion         = VK_MAKE_VERSION(1, 14, 1);
     appInfo.apiVersion            = VK_MAKE_VERSION(1, 1, 0);
-    
+
     VkInstanceCreateInfo info;
     info.sType                    = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     info.pNext                    = nullptr;
@@ -145,22 +151,22 @@ namespace dxvk {
     info.ppEnabledLayerNames      = nullptr;
     info.enabledExtensionCount    = extensionNameList.count();
     info.ppEnabledExtensionNames  = extensionNameList.names();
-    
+
     VkInstance result = VK_NULL_HANDLE;
     VkResult status = m_vkl->vkCreateInstance(&info, nullptr, &result);
 
     if (status != VK_SUCCESS)
       throw DxvkError("DxvkInstance::createInstance: Failed to create Vulkan 1.1 instance");
-    
+
     return result;
   }
-  
-  
+
+
   std::vector<Rc<DxvkAdapter>> DxvkInstance::queryAdapters() {
     uint32_t numAdapters = 0;
     if (m_vki->vkEnumeratePhysicalDevices(m_vki->instance(), &numAdapters, nullptr) != VK_SUCCESS)
       throw DxvkError("DxvkInstance::enumAdapters: Failed to enumerate adapters");
-    
+
     std::vector<VkPhysicalDevice> adapters(numAdapters);
     if (m_vki->vkEnumeratePhysicalDevices(m_vki->instance(), &numAdapters, adapters.data()) != VK_SUCCESS)
       throw DxvkError("DxvkInstance::enumAdapters: Failed to enumerate adapters");
@@ -178,14 +184,23 @@ namespace dxvk {
     // panDXVK: always skip Adreno adapters
     filterFlags.set(DxvkDeviceFilterFlag::SkipAdrenoDevices);
 
-    DxvkDeviceFilter filter(filterFlags);
+    DxvkDeviceFilter filter(filterFlags, m_options);
     std::vector<Rc<DxvkAdapter>> result;
 
+    uint32_t numDGPU = 0;
+    uint32_t numIGPU = 0;
+
     for (uint32_t i = 0; i < numAdapters; i++) {
-      if (filter.testAdapter(deviceProperties[i]))
+      if (filter.testAdapter(deviceProperties[i])) {
+        if (deviceProperties[i].deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+          numDGPU += 1;
+        else if (deviceProperties[i].deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+          numIGPU += 1;
+
         result.push_back(new DxvkAdapter(m_vki, adapters[i]));
+      }
     }
-    
+
     std::stable_sort(result.begin(), result.end(),
       [] (const Rc<DxvkAdapter>& a, const Rc<DxvkAdapter>& b) -> bool {
         static const std::array<VkPhysicalDeviceType, 3> deviceTypes = {{
@@ -204,19 +219,24 @@ namespace dxvk {
 
         return aRank < bRank;
       });
-    
+
+    if (m_options.hideIntegratedGraphics && numDGPU > 0 && numIGPU > 0) {
+      result.resize(numDGPU);
+      numIGPU = 0;
+    }
+
     if (result.size() == 0) {
       Logger::warn("DXVK: No adapters found. Please check your "
                    "device filter settings and Vulkan setup.");
     }
-    
+
     return result;
   }
-  
-  
+
+
   void DxvkInstance::logNameList(const DxvkNameList& names) {
     for (uint32_t i = 0; i < names.count(); i++)
       Logger::info(str::format("  ", names.name(i)));
   }
-  
+
 }

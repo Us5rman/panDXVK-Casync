@@ -26,14 +26,14 @@ namespace dxvk::hud {
     std::string::size_type pos = 0;
     std::string::size_type end = 0;
     std::string::size_type mid = 0;
-    
+
     while (pos < configStr.size()) {
       end = configStr.find(',', pos);
       mid = configStr.find('=', pos);
-      
+
       if (end == std::string::npos)
         end = configStr.size();
-      
+
       if (mid != std::string::npos && mid < end) {
         m_options.insert({
           configStr.substr(pos,     mid - pos),
@@ -47,7 +47,7 @@ namespace dxvk::hud {
 
     if (m_enabled.find("full") != m_enabled.end())
       m_enableFull = true;
-    
+
     if (m_enabled.find("1") != m_enabled.end()) {
       m_enabled.insert("devinfo");
       m_enabled.insert("fps");
@@ -101,7 +101,7 @@ namespace dxvk::hud {
 
 
   HudClientApiItem::HudClientApiItem(std::string api)
-  : m_api(api) {
+  : m_api(std::move(api)) {
 
   }
 
@@ -130,6 +130,11 @@ namespace dxvk::hud {
     VkPhysicalDeviceProperties props = device->adapter()->deviceProperties();
 
     m_deviceName = props.deviceName;
+
+    // Screenshots reach bug reports far more often than logs do, so the
+    // device line carries the same warning the log emits at startup.
+    if (DxvkAdapter::hasDegradedFeatures(device->features()))
+      m_deviceName += " [DEGRADED]";
     m_driverVer = str::format("Driver: ",
       VK_VERSION_MAJOR(props.driverVersion), ".",
       VK_VERSION_MINOR(props.driverVersion), ".",
@@ -154,13 +159,13 @@ namespace dxvk::hud {
       { position.x, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
       m_deviceName);
-    
+
     position.y += 24.0f;
     renderer.drawText(16.0f,
       { position.x, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
       m_driverVer);
-    
+
     position.y += 20.0f;
     renderer.drawText(16.0f,
       { position.x, position.y },
@@ -234,39 +239,39 @@ namespace dxvk::hud {
     const float targetUs =  16'666.6f;
     const float minUs    =   5'000.0f;
     const float maxUs    = 100'000.0f;
-    
+
     // Ten times the maximum/minimum number
     // of milliseconds for a single frame
     uint32_t minMs = 0xFFFFFFFFu;
     uint32_t maxMs = 0x00000000u;
-    
+
     // Paint the time points
     for (uint32_t i = 0; i < NumDataPoints; i++) {
       float us = m_dataPoints[(m_dataPointId + i) % NumDataPoints];
-      
+
       minMs = std::min(minMs, uint32_t(us / 100.0f));
       maxMs = std::max(maxMs, uint32_t(us / 100.0f));
-      
+
       float r = std::min(std::max(-1.0f + us / targetUs, 0.0f), 1.0f);
       float g = std::min(std::max( 3.0f - us / targetUs, 0.0f), 1.0f);
       float l = std::sqrt(r * r + g * g);
-      
+
       HudNormColor color = {
         uint8_t(255.0f * (r / l)),
         uint8_t(255.0f * (g / l)),
         uint8_t(0), uint8_t(255) };
-      
+
       float hVal = std::log2(std::max((us - minUs) / targetUs + 1.0f, 1.0f))
                  / std::log2((maxUs - minUs) / targetUs);
-      
+
       points[i].value = std::max(hVal, 1.0f / 40.0f);
       points[i].color = color;
     }
-    
+
     renderer.drawGraph(position,
       HudPos { float(NumDataPoints), 40.0f },
       points.size(), points.data());
-    
+
     position.y += 58.0f;
 
     renderer.drawText(12.0f,
@@ -278,17 +283,17 @@ namespace dxvk::hud {
       { position.x + 45.0f, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
       str::format(minMs / 10, ".", minMs % 10));
-    
+
     renderer.drawText(12.0f,
       { position.x + 150.0f, position.y },
       { 1.0f, 0.25f, 0.25f, 1.0f },
       "max:");
-    
+
     renderer.drawText(12.0f,
       { position.x + 195.0f, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
       str::format(maxMs / 10, ".", maxMs % 10));
-    
+
     position.y += 4.0f;
     return position;
   }
@@ -307,7 +312,7 @@ namespace dxvk::hud {
 
   void HudSubmissionStatsItem::update(dxvk::high_resolution_clock::time_point time) {
     DxvkStatCounters counters = m_device->getStatCounters();
-    
+
     uint64_t currSubmitCount = counters.getCtr(DxvkStatCounter::QueueSubmitCount);
     uint64_t currSyncCount = counters.getCtr(DxvkStatCounter::GpuSyncCount);
     uint64_t currSyncTicks = counters.getCtr(DxvkStatCounter::GpuSyncTicks);
@@ -409,45 +414,45 @@ namespace dxvk::hud {
       { position.x, position.y },
       { 0.25f, 0.5f, 1.0f, 1.0f },
       "Draw calls:");
-    
+
     renderer.drawText(16.0f,
       { position.x + 192.0f, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
       str::format(m_gpCount));
-    
+
     position.y += 20.0f;
     renderer.drawText(16.0f,
       { position.x, position.y },
       { 0.25f, 0.5f, 1.0f, 1.0f },
       "Dispatch calls:");
-    
+
     renderer.drawText(16.0f,
       { position.x + 192.0f, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
       str::format(m_cpCount));
-    
+
     position.y += 20.0f;
     renderer.drawText(16.0f,
       { position.x, position.y },
       { 0.25f, 0.5f, 1.0f, 1.0f },
       "Render passes:");
-    
+
     renderer.drawText(16.0f,
       { position.x + 192.0f, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
       str::format(m_rpCount));
-    
+
     position.y += 20.0f;
     renderer.drawText(16.0f,
       { position.x, position.y },
       { 0.25f, 0.5f, 1.0f, 1.0f },
       "Barriers:");
-    
+
     renderer.drawText(16.0f,
       { position.x + 192.0f, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
       str::format(m_pbCount));
-    
+
     position.y += 8.0f;
     return position;
   }
@@ -480,12 +485,12 @@ namespace dxvk::hud {
       { position.x, position.y },
       { 1.0f, 0.25f, 1.0f, 1.0f },
       "Graphics pipelines:");
-    
+
     renderer.drawText(16.0f,
       { position.x + 240.0f, position.y },
       { 1.0f, 1.0f, 1.0f, 1.0f },
       str::format(m_graphicsPipelines));
-    
+
     position.y += 20.0f;
     renderer.drawText(16.0f,
       { position.x, position.y },
@@ -527,7 +532,9 @@ namespace dxvk::hud {
 
       uint64_t memUsedMib = m_heaps[i].memoryUsed >> 20;
       uint64_t memAllocatedMib = m_heaps[i].memoryAllocated >> 20;
-      uint64_t percentage = (100 * m_heaps[i].memoryAllocated) / m_memory.memoryHeaps[i].size;
+      uint64_t percentage = m_heaps[i].memoryBudget
+        ? (100 * m_heaps[i].memoryAllocated) / m_heaps[i].memoryBudget
+        : 0u;
 
       std::string label = str::format(isDeviceLocal ? "Vidmem" : "Sysmem", " heap ", i, ": ");
       std::string text  = str::format(std::setfill(' '), std::setw(5), memAllocatedMib, " MB (", percentage, "%) ",

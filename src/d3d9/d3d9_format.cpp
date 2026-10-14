@@ -1,4 +1,6 @@
 #include "d3d9_format.h"
+#include "d3d9_adapter.h"
+#include "d3d9_names.h"
 
 namespace dxvk {
 
@@ -168,6 +170,16 @@ namespace dxvk {
         // Convert -> float (this is a mixed snorm and unorm type)
           VK_FORMAT_R16G16B16A16_SFLOAT } };
 
+      case D3D9Format::W11V11U10: return {
+        VK_FORMAT_B10G11R11_UFLOAT_PACK32,
+        VK_FORMAT_UNDEFINED,
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
+          VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_ONE },
+        { D3D9ConversionFormat_W11V11U10,
+        // can't use B10G11R11 because this is a snorm type
+          VK_FORMAT_R16G16B16A16_SNORM } };
+
       case D3D9Format::UYVY: return {
         VK_FORMAT_B8G8R8A8_UNORM,
         VK_FORMAT_UNDEFINED,
@@ -257,15 +269,9 @@ namespace dxvk {
         VK_FORMAT_UNDEFINED,
         VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT };
 
-      case D3D9Format::D32_LOCKABLE: return {
-        VK_FORMAT_D32_SFLOAT,
-        VK_FORMAT_UNDEFINED,
-        VK_IMAGE_ASPECT_DEPTH_BIT };
+      case D3D9Format::D32_LOCKABLE: return {}; // Unsupported (everywhere)
 
-      case D3D9Format::S8_LOCKABLE: return {
-        VK_FORMAT_S8_UINT,
-        VK_FORMAT_UNDEFINED,
-        VK_IMAGE_ASPECT_STENCIL_BIT };
+      case D3D9Format::S8_LOCKABLE: return {}; // Unsupported (everywhere)
 
       case D3D9Format::L16: return {
         VK_FORMAT_R16_UNORM,
@@ -338,10 +344,7 @@ namespace dxvk {
 
       case D3D9Format::A1: return {}; // Unsupported
 
-      case D3D9Format::A2B10G10R10_XR_BIAS: return {
-        VK_FORMAT_A2B10G10R10_SNORM_PACK32,
-        VK_FORMAT_UNDEFINED,
-        VK_IMAGE_ASPECT_COLOR_BIT };
+      case D3D9Format::A2B10G10R10_XR_BIAS: return {}; // Unsupported (everywhere)
 
       case D3D9Format::BINARYBUFFER: return {
         VK_FORMAT_R8_UINT,
@@ -392,6 +395,8 @@ namespace dxvk {
 
       case D3D9Format::ATOC: return {}; // Driver hack, handled elsewhere
 
+      case D3D9Format::SSAA: return {}; // Driver hack, handled elsewhere
+
       case D3D9Format::INTZ: return {
         VK_FORMAT_D24_UNORM_S8_UINT,
         VK_FORMAT_UNDEFINED,
@@ -419,6 +424,29 @@ namespace dxvk {
 
       case D3D9Format::RAWZ: return {}; // Unsupported
 
+      // EXT1, FXT1, GXT1 and HXT1 are checked for support
+      // by D3D9 SAGE engine games (e.g. Command & Conquer 3)
+
+      case D3D9Format::EXT1: return {}; // Unsupported (everywhere)
+
+      case D3D9Format::FXT1: return {}; // Unsupported (everywhere)
+
+      case D3D9Format::GXT1: return {}; // Unsupported (everywhere)
+
+      case D3D9Format::HXT1: return {}; // Unsupported (everywhere)
+
+      // AL16 and R16 FOURCCs are often checked for support by
+      // various D3D8 and early D3D9 games. AR16 and L16 (FOURCC)
+      // are also checked for support, but to a lesser extent.
+
+      case D3D9Format::AL16: return {}; // Unsupported (everywhere)
+
+      case D3D9Format::AR16: return {}; // Unsupported (everywhere)
+
+      case D3D9Format::R16:  return {}; // Unsupported (everywhere)
+
+      case D3D9Format::L16_FOURCC:  return {}; // Unsupported (everywhere)
+
       default:
         Logger::warn(str::format("ConvertFormat: Unknown format encountered: ", Format));
         return {}; // Unsupported
@@ -430,11 +458,14 @@ namespace dxvk {
     const D3D9Options&     options) {
     m_dfSupport = options.supportDFFormats;
     m_x4r4g4b4Support = options.supportX4R4G4B4;
+    // W11V11U10 is only supported by D3D8
+    m_w11v11u10Support = false;
     m_d32supportFinal = options.supportD32;
 
     // AMD do not support 24-bit depth buffers on Vulkan,
     // so we have to fall back to a 32-bit depth format.
-    m_d24s8Support = CheckImageFormatSupport(adapter, VK_FORMAT_D24_UNORM_S8_UINT,
+    m_d24s8Support = !options.useD32forD24 &&
+                     CheckImageFormatSupport(adapter, VK_FORMAT_D24_UNORM_S8_UINT,
       VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT |
       VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT);
 
@@ -469,6 +500,9 @@ namespace dxvk {
     if (Format == D3D9Format::X4R4G4B4 && !m_x4r4g4b4Support)
       return D3D9_VK_FORMAT_MAPPING();
 
+    if (Format == D3D9Format::W11V11U10 && !m_w11v11u10Support)
+      return D3D9_VK_FORMAT_MAPPING();
+
     if (Format == D3D9Format::DF16 && !m_dfSupport)
       return D3D9_VK_FORMAT_MAPPING();
 
@@ -477,9 +511,9 @@ namespace dxvk {
 
     if (Format == D3D9Format::D32 && !m_d32supportFinal)
       return D3D9_VK_FORMAT_MAPPING();
-    
+
     if (!m_d24s8Support && mapping.FormatColor == VK_FORMAT_D24_UNORM_S8_UINT)
-      mapping.FormatColor = VK_FORMAT_D32_SFLOAT_S8_UINT;
+      mapping.FormatColor = (mapping.Aspect & VK_IMAGE_ASPECT_STENCIL_BIT) ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_D32_SFLOAT;
 
     if (!m_d16s8Support && mapping.FormatColor == VK_FORMAT_D16_UNORM_S8_UINT)
       mapping.FormatColor = m_d24s8Support ? VK_FORMAT_D24_UNORM_S8_UINT : VK_FORMAT_D32_SFLOAT_S8_UINT;
@@ -550,16 +584,23 @@ namespace dxvk {
         return &unknown;
     }
   }
-  
+
 
   bool D3D9VkFormatTable::CheckImageFormatSupport(
     const Rc<DxvkAdapter>&      Adapter,
           VkFormat              Format,
           VkFormatFeatureFlags  Features) const {
     VkFormatProperties supported = Adapter->formatProperties(Format);
-    
+
     return (supported.linearTilingFeatures  & Features) == Features
         || (supported.optimalTilingFeatures & Features) == Features;
+  }
+
+
+  void D3D9VkFormatTable::RefreshFormatSupport(
+    const D3D9Adapter*          pParent) {
+    // W11V11U10 is only supported by D3D8
+    m_w11v11u10Support = pParent->IsD3DCompatibile(D3DCompatibility::D3D8);
   }
 
 }

@@ -1,3 +1,6 @@
+#ifndef DXVK_THREAD_H
+#define DXVK_THREAD_H
+
 #pragma once
 
 #include <cstdint>
@@ -17,21 +20,18 @@
 
 namespace dxvk {
 
-#ifdef _WIN32
   /**
    * \brief Thread priority
    */
   enum class ThreadPriority : int32_t {
-    Lowest      = THREAD_PRIORITY_LOWEST,
-    Low         = THREAD_PRIORITY_BELOW_NORMAL,
-    Normal      = THREAD_PRIORITY_NORMAL,
-    High        = THREAD_PRIORITY_ABOVE_NORMAL,
-    Highest     = THREAD_PRIORITY_HIGHEST,
+    Normal,
+    Lowest,
   };
 
+#ifdef _WIN32
   /**
    * \brief Thread helper class
-   * 
+   *
    * This is needed mostly  for winelib builds. Wine needs to setup each thread that
    * calls Windows APIs. It means that in winelib builds, we can't let standard C++
    * library create threads and need to use Wine for that instead. We use a thin wrapper
@@ -50,7 +50,7 @@ namespace dxvk {
       m_handle = ::CreateThread(nullptr, 0x100000,
         ThreadFn::threadProc, this, STACK_SIZE_PARAM_IS_A_RESERVATION,
         nullptr);
-      
+
       if (m_handle == nullptr)
         throw DxvkError("Failed to create thread");
     }
@@ -59,7 +59,7 @@ namespace dxvk {
       if (this->joinable())
         std::terminate();
     }
-    
+
     void detach() {
       ::CloseHandle(m_handle);
       m_handle = nullptr;
@@ -76,7 +76,13 @@ namespace dxvk {
     }
 
     void set_priority(ThreadPriority priority) {
-      ::SetThreadPriority(m_handle, int32_t(priority));
+      int32_t value;
+      switch (priority) {
+        default:
+        case ThreadPriority::Normal: value = THREAD_PRIORITY_NORMAL; break;
+        case ThreadPriority::Lowest: value = THREAD_PRIORITY_LOWEST; break;
+      }
+      ::SetThreadPriority(m_handle, int32_t(value));
     }
 
   private:
@@ -96,7 +102,7 @@ namespace dxvk {
 
   /**
    * \brief RAII thread wrapper
-   * 
+   *
    * Wrapper for \c ThreadFn that can be used
    * as a drop-in replacement for \c std::thread.
    */
@@ -133,7 +139,7 @@ namespace dxvk {
     void set_priority(ThreadPriority priority) {
       m_thread->set_priority(priority);
     }
-    
+
     static uint32_t hardware_concurrency() {
       SYSTEM_INFO info = { };
       ::GetSystemInfo(&info);
@@ -155,6 +161,8 @@ namespace dxvk {
     inline uint32_t get_id() {
       return uint32_t(GetCurrentThreadId());
     }
+
+    bool isInModuleDetachment();
   }
 
 
@@ -332,8 +340,23 @@ namespace dxvk {
   };
 
 #else
+  class thread : public std::thread {
+  public:
+    using std::thread::thread;
+
+    void set_priority(ThreadPriority priority) {
+      ::sched_param param = {};
+      int32_t policy;
+      switch (priority) {
+        default:
+        case ThreadPriority::Normal: policy = SCHED_OTHER; break;
+        case ThreadPriority::Lowest: policy = SCHED_IDLE;  break;
+      }
+      ::pthread_setschedparam(this->native_handle(), policy, &param);
+    }
+  };
+
   using mutex              = std::mutex;
-  using thread             = std::thread;
   using recursive_mutex    = std::recursive_mutex;
   using condition_variable = std::condition_variable;
 
@@ -343,7 +366,13 @@ namespace dxvk {
     }
 
     uint32_t get_id();
+
+    inline bool isInModuleDetachment() {
+      return false;
+    }
   }
 #endif
 
 }
+
+#endif // DXVK_THREAD_H

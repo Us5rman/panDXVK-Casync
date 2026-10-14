@@ -3,15 +3,16 @@
 #include "d3d9_monitor.h"
 #include "d3d9_caps.h"
 #include "d3d9_device.h"
+#include "d3d9_bridge.h"
 
 #include <algorithm>
 
 namespace dxvk {
 
   D3D9InterfaceEx::D3D9InterfaceEx(bool bExtended)
-    : m_instance    ( new DxvkInstance() )
-    , m_extended    ( bExtended ) 
-    , m_d3d9Options ( nullptr, m_instance->config() ) {
+    : m_instance        ( new DxvkInstance() )
+    , m_legacyD3DBridge ( this )
+    , m_d3d9Options     ( nullptr, m_instance->config() ) {
     // D3D9 doesn't enumerate adapters like physical adapters...
     // only as connected displays.
 
@@ -20,6 +21,7 @@ namespace dxvk {
     // If we run out of adapters, then we'll just make repeats of the first one.
     // We can't match up by names on Linux/Wine as they don't match at all
     // like on Windows, so this is our best option.
+#ifdef _WIN32
     if (m_d3d9Options.enumerateByDisplays) {
       DISPLAY_DEVICEA device = { };
       device.cb = sizeof(device);
@@ -44,6 +46,7 @@ namespace dxvk {
       }
     }
     else
+#endif
     {
       const uint32_t adapterCount = m_instance->adapterCount();
       m_adapters.reserve(adapterCount);
@@ -52,10 +55,20 @@ namespace dxvk {
         m_adapters.emplace_back(this, m_instance->enumAdapters(i), i, 0);
     }
 
+#ifdef _WIN32
     if (m_d3d9Options.dpiAware) {
       Logger::info("Process set as DPI aware");
       SetProcessDPIAware();
     }
+#endif
+
+    if (bExtended) {
+      m_d3dCompatibility.set(D3DCompatibility::D3D9Ex);
+      Logger::info("The D3D9 interface is operating in D3D9Ex mode.");
+    }
+
+    if (unlikely(m_d3d9Options.shaderModel == 0))
+      Logger::warn("WARNING! Fixed-function exclusive mode is enabled.");
   }
 
 
@@ -67,8 +80,14 @@ namespace dxvk {
 
     if (riid == __uuidof(IUnknown)
      || riid == __uuidof(IDirect3D9)
-     || (m_extended && riid == __uuidof(IDirect3D9Ex))) {
+     || (m_d3dCompatibility.test(D3DCompatibility::D3D9Ex) &&
+         riid == __uuidof(IDirect3D9Ex))) {
       *ppvObject = ref(this);
+      return S_OK;
+    }
+
+    if (riid == __uuidof(IDxvkLegacyD3DInterfaceBridge)) {
+      *ppvObject = ref(&m_legacyD3DBridge);
       return S_OK;
     }
 
@@ -105,7 +124,7 @@ namespace dxvk {
     filter.Size             = sizeof(D3DDISPLAYMODEFILTER);
     filter.Format           = Format;
     filter.ScanLineOrdering = D3DSCANLINEORDERING_PROGRESSIVE;
-    
+
     return this->GetAdapterModeCountEx(Adapter, &filter);
   }
 
@@ -169,7 +188,7 @@ namespace dxvk {
           D3DFORMAT           SurfaceFormat,
           BOOL                Windowed,
           D3DMULTISAMPLE_TYPE MultiSampleType,
-          DWORD*              pQualityLevels) { 
+          DWORD*              pQualityLevels) {
     if (auto* adapter = GetAdapter(Adapter))
       return adapter->CheckDeviceMultiSampleType(
         DeviceType, EnumerateFormat(SurfaceFormat),
@@ -324,6 +343,24 @@ namespace dxvk {
     if (ppReturnedDeviceInterface == nullptr
     || pPresentationParameters    == nullptr)
       return D3DERR_INVALIDCALL;
+
+    if (unlikely(DeviceType == D3DDEVTYPE_SW))
+      return D3DERR_INVALIDCALL;
+
+    // Creating a device with D3DCREATE_PUREDEVICE only works in conjunction
+    // with D3DCREATE_HARDWARE_VERTEXPROCESSING on native drivers.
+    if (unlikely(BehaviorFlags & D3DCREATE_PUREDEVICE &&
+               !(BehaviorFlags & D3DCREATE_HARDWARE_VERTEXPROCESSING)))
+      return D3DERR_INVALIDCALL;
+
+    // Neither D3DDEVTYPE_REF nor D3DDEVTYPE_NULLREF support HWVP, although they
+    // will accept these flags as any regular D3DDEVTYPE_HAL device would.
+    if (unlikely(DeviceType == D3DDEVTYPE_REF || DeviceType == D3DDEVTYPE_NULLREF)) {
+      BehaviorFlags &= ~D3DCREATE_MIXED_VERTEXPROCESSING
+                     & ~D3DCREATE_PUREDEVICE
+                     & ~D3DCREATE_HARDWARE_VERTEXPROCESSING;
+      BehaviorFlags |= D3DCREATE_SOFTWARE_VERTEXPROCESSING;
+    }
 
     auto* adapter = GetAdapter(Adapter);
 

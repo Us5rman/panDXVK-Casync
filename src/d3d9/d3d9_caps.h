@@ -25,11 +25,12 @@ namespace dxvk::caps {
 
   constexpr uint32_t MaxTransforms                = 10 + 256;
 
-  constexpr uint32_t TextureStageCount           = MaxSimultaneousTextures;
+  constexpr uint32_t TextureStageCount            = MaxSimultaneousTextures;
 
   constexpr uint32_t MaxEnabledLights             = 8;
 
   constexpr uint32_t MaxTexturesVS                = 4;
   constexpr uint32_t MaxTexturesPS                = 16;
+  constexpr uint32_t MaxTextures                  = MaxTexturesVS + MaxTexturesPS + 1; // 1 additional texture for the dmap sampler
 
 }

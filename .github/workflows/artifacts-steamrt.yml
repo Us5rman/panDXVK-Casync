@@ -1,0 +1,82 @@
+name: Artifacts (SteamRT)
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  artifacts-steamrt:
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.image }}
+      options: --user 1001
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: sniper
+            runner: ubuntu-latest
+            image: registry.gitlab.steamos.cloud/proton/sniper/sdk:latest
+            arches: 32 64
+            make_args: >-
+              CROSSFILE_DIR=.github/crossfiles
+              CROSSFILE_32=steamrt-i386.txt
+              CROSSFILE_64=steamrt-x86_64.txt
+              ARCHDIR_32=i386-windows
+              ARCHDIR_64=x86_64-windows
+              MESON_OPTS_64=-Denable_ddraw=false
+          - variant: steamrt4
+            runner: ubuntu-latest
+            image: registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:latest
+            arches: 32 64
+            make_args: >-
+              CROSSFILE_DIR=.github/crossfiles
+              CROSSFILE_32=steamrt-i386.txt
+              CROSSFILE_64=steamrt-x86_64.txt
+              ARCHDIR_32=i386-windows
+              ARCHDIR_64=x86_64-windows
+              MESON_OPTS_64=-Denable_ddraw=false
+          - variant: steamrt4-arm64
+            runner: ubuntu-24.04-arm
+            image: registry.gitlab.steamos.cloud/proton/steamrt4/sdk/arm64-llvm:latest
+            arches: 32 64 aarch64
+            make_args: >-
+              CROSSFILE_DIR=.github/crossfiles
+              CROSSFILE_32=steamrt-i386-llvm.txt
+              CROSSFILE_64=steamrt-x86_64-llvm.txt
+              CROSSFILE_aarch64=steamrt-aarch64-llvm.txt
+              ARCHDIR_32=i386-windows
+              ARCHDIR_64=x86_64-windows
+              ARCHDIR_aarch64=aarch64-windows
+              MESON_OPTS_64=-Denable_ddraw=false
+              MESON_OPTS_aarch64=-Denable_ddraw=false
+
+    steps:
+    - name: Checkout code
+      id: checkout-code
+      uses: actions/checkout@v6
+      with:
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: Setup problem matcher
+      uses: Joshua-Ashton/gcc-problem-matcher@master
+
+    - name: Get version
+      id: get-version
+      shell: bash
+      run: |
+        echo "VERSION_NAME=${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::8}" >> $GITHUB_ENV
+        echo "VERSION=$(cat RELEASE)" >> $GITHUB_ENV
+
+    - name: Build dist tree
+      id: build-dist
+      shell: bash
+      run: make dist ARCHES="${{ matrix.arches }}" ${{ matrix.make_args }}
+
+    - name: Upload artifacts
+      id: upload-artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: dxvk-sarek-${{ matrix.variant }}-${{ env.VERSION_NAME }}
+        path: build/dist/dxvk-sarek-${{ env.VERSION }}
+        if-no-files-found: error

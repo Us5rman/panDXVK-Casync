@@ -8,6 +8,7 @@
 #include "../util/util_bit.h"
 #include "../util/util_luid.h"
 #include "../util/util_ratio.h"
+#include "../util/util_string.h"
 
 #include <cfloat>
 
@@ -15,14 +16,17 @@ namespace dxvk {
 
   const char* GetDriverDLL(DxvkGpuVendor vendor) {
     switch (vendor) {
-      default:
       case DxvkGpuVendor::Nvidia: return "nvd3dum.dll";
 
 #if defined(__x86_64__) || defined(_M_X64)
+      default:
       case DxvkGpuVendor::Amd:    return "aticfx64.dll";
+
       case DxvkGpuVendor::Intel:  return "igdumd64.dll";
 #else
+      default:
       case DxvkGpuVendor::Amd:    return "aticfx32.dll";
+
       case DxvkGpuVendor::Intel:  return "igdumd32.dll";
 #endif
     }
@@ -56,7 +60,7 @@ namespace dxvk {
       return D3DERR_INVALIDCALL;
 
     auto& options = m_parent->GetOptions();
-    
+
     const auto& props = m_adapter->deviceProperties();
 
     DISPLAY_DEVICEA device = { };
@@ -69,21 +73,81 @@ namespace dxvk {
 
     GUID guid          = bit::cast<GUID>(m_adapter->devicePropertiesExt().coreDeviceId.deviceUUID);
 
-    uint32_t vendorId  = options.customVendorId == -1     ? props.vendorID   : uint32_t(options.customVendorId);
-    uint32_t deviceId  = options.customDeviceId == -1     ? props.deviceID   : uint32_t(options.customDeviceId);
-    const char*  desc  = options.customDeviceDesc.empty() ? props.deviceName : options.customDeviceDesc.c_str();
+    // Old path: customVendorId / customDeviceId / customDeviceDesc still take precedence.
+    uint32_t    vendorId = options.customVendorId == -1     ? props.vendorID   : uint32_t(options.customVendorId);
+    uint32_t    deviceId = options.customDeviceId == -1     ? props.deviceID   : uint32_t(options.customDeviceId);
+    std::string desc     = options.customDeviceDesc.empty() ? std::string(props.deviceName) : options.customDeviceDesc;
+
+    // Hide GPU logic (backported from upstream). Only kicks in when the user
+    // hasnt already pinned a custom vendor ID. customDeviceId / customDeviceDesc
+    // continue to override the fallbacks individually.
+    if (options.customVendorId == -1) {
+      bool isNonclassicalVendorId = vendorId != uint32_t(DxvkGpuVendor::Nvidia)
+                                 && vendorId != uint32_t(DxvkGpuVendor::Amd)
+                                 && vendorId != uint32_t(DxvkGpuVendor::Intel);
+
+      if (isNonclassicalVendorId)
+        Logger::info(str::format("D3D9: Detected nonclassical vendor ID: 0x", std::hex, vendorId));
+
+      uint32_t     fallbackVendor = 0xdead;
+      uint32_t     fallbackDevice = 0xbeef;
+      const char*  fallbackDesc   = "Generic Graphics Card";
+
+      if (!options.hideAmdGpu) {
+        // AMD RX 6700 XT
+        fallbackVendor = uint32_t(DxvkGpuVendor::Amd);
+        fallbackDevice = 0x73df;
+        fallbackDesc   = "AMD Radeon RX 6700 XT";
+      } else if (!options.hideNvidiaGpu) {
+        // Nvidia RTX 3060
+        fallbackVendor = uint32_t(DxvkGpuVendor::Nvidia);
+        fallbackDevice = 0x2487;
+        fallbackDesc   = "NVIDIA GeForce RTX 3060";
+      }
+
+      // Pick between hideNvidiaGpu and hideNvkGpu based on which driver we are on.
+      bool isNvidiaProprietary = m_adapter->matchesDriver(
+                                   DxvkGpuVendor::Nvidia,
+                                   VK_DRIVER_ID_NVIDIA_PROPRIETARY_KHR,
+                                   0, 0);
+      bool hideNvidiaGpu = isNvidiaProprietary ? options.hideNvidiaGpu : options.hideNvkGpu;
+
+      bool hideGpu = (vendorId == uint32_t(DxvkGpuVendor::Nvidia) && hideNvidiaGpu)
+                  || (vendorId == uint32_t(DxvkGpuVendor::Amd)    && options.hideAmdGpu)
+                  || (vendorId == uint32_t(DxvkGpuVendor::Intel)  && options.hideIntelGpu)
+                  // Hide the GPU by default for other vendors (default to reporting AMD)
+                  || isNonclassicalVendorId;
+
+      if (hideGpu) {
+        vendorId = fallbackVendor;
+
+        if (options.customDeviceId == -1)
+          deviceId = fallbackDevice;
+
+        if (options.customDeviceDesc.empty())
+          desc = fallbackDesc;
+
+        Logger::info(str::format("D3D9: Hiding actual GPU, reporting:\n",
+                                 "  vendor ID: 0x", std::hex, vendorId, "\n",
+                                 "  device ID: 0x", std::hex, deviceId, "\n",
+                                 "  device description: ", desc, "\n"));
+      }
+    }
+
     const char* driver = GetDriverDLL(DxvkGpuVendor(vendorId));
 
-    copyToStringArray(pIdentifier->Description, desc);
+    copyToStringArray(pIdentifier->Description, desc.c_str());
     copyToStringArray(pIdentifier->DeviceName,  device.DeviceName); // The GDI device name. Not the actual device name.
     copyToStringArray(pIdentifier->Driver,      driver);            // This is the driver's dll.
+
+    const bool isExtended = m_parent->IsD3DCompatibile(D3DCompatibility::D3D9Ex);
 
     pIdentifier->DeviceIdentifier       = guid;
     pIdentifier->DeviceId               = deviceId;
     pIdentifier->VendorId               = vendorId;
     pIdentifier->Revision               = 0;
     pIdentifier->SubSysId               = 0;
-    pIdentifier->WHQLLevel              = m_parent->IsExtended() ? 1 : 0; // This doesn't check with the driver on Direct3D9Ex and is always 1.
+    pIdentifier->WHQLLevel              = isExtended ? 1 : 0; // This doesn't check with the driver on Direct3D9Ex and is always 1.
     pIdentifier->DriverVersion.QuadPart = INT64_MAX;
 
     return D3D_OK;
@@ -111,6 +175,12 @@ namespace dxvk {
           DWORD           Usage,
           D3DRESOURCETYPE RType,
           D3D9Format      CheckFormat) {
+    if (unlikely(AdapterFormat == D3D9Format::Unknown))
+      return D3DERR_INVALIDCALL;
+
+    if (unlikely(RType == D3DRTYPE_VERTEXBUFFER || RType == D3DRTYPE_INDEXBUFFER))
+      return D3DERR_INVALIDCALL;
+
     if (!IsSupportedAdapterFormat(AdapterFormat))
       return D3DERR_NOTAVAILABLE;
 
@@ -159,8 +229,9 @@ namespace dxvk {
     if (mapping.FormatSrgb  == VK_FORMAT_UNDEFINED && srgb)
       return D3DERR_NOTAVAILABLE;
 
-    if (RType == D3DRTYPE_VERTEXBUFFER || RType == D3DRTYPE_INDEXBUFFER)
-      return D3D_OK;
+    if (RType == D3DRTYPE_CUBETEXTURE && mapping.Aspect != VK_IMAGE_ASPECT_COLOR_BIT
+     && !m_parent->GetOptions().supportCubeDepthFormats)
+      return D3DERR_NOTAVAILABLE;
 
     // Let's actually ask Vulkan now that we got some quirks out the way!
     return CheckDeviceVkFormat(mapping.FormatColor, Usage, RType);
@@ -176,14 +247,28 @@ namespace dxvk {
     if (pQualityLevels != nullptr)
       *pQualityLevels = 1;
 
+    if (unlikely(MultiSampleType > D3DMULTISAMPLE_16_SAMPLES))
+      return D3DERR_INVALIDCALL;
+
+    if (unlikely(SurfaceFormat == D3D9Format::Unknown))
+      return D3DERR_INVALIDCALL;
+
     auto dst = ConvertFormatUnfixed(SurfaceFormat);
-    if (dst.FormatColor == VK_FORMAT_UNDEFINED)
+    // Wargame: European Escalation expects a D3DMULTISAMPLE_NONE
+    // NULL format check to succeed, otherwise it will crash
+    if (SurfaceFormat != D3D9Format::NULL_FORMAT && dst.FormatColor == VK_FORMAT_UNDEFINED)
       return D3DERR_NOTAVAILABLE;
 
     if (MultiSampleType != D3DMULTISAMPLE_NONE
      && (SurfaceFormat == D3D9Format::D32_LOCKABLE
       || SurfaceFormat == D3D9Format::D32F_LOCKABLE
-      || SurfaceFormat == D3D9Format::D16_LOCKABLE))
+      || SurfaceFormat == D3D9Format::D16_LOCKABLE
+      || SurfaceFormat == D3D9Format::INTZ
+      || SurfaceFormat == D3D9Format::DXT1
+      || SurfaceFormat == D3D9Format::DXT2
+      || SurfaceFormat == D3D9Format::DXT3
+      || SurfaceFormat == D3D9Format::DXT4
+      || SurfaceFormat == D3D9Format::DXT5))
       return D3DERR_NOTAVAILABLE;
 
     uint32_t sampleCount = std::max<uint32_t>(MultiSampleType, 1u);
@@ -191,13 +276,12 @@ namespace dxvk {
     // Check if this is a power of two...
     if (sampleCount & (sampleCount - 1))
       return D3DERR_NOTAVAILABLE;
-    
+
     // Therefore...
     VkSampleCountFlags sampleFlags = VkSampleCountFlags(sampleCount);
 
-    auto availableFlags = !IsDepthFormat(SurfaceFormat)
-      ? m_adapter->deviceProperties().limits.framebufferColorSampleCounts
-      : m_adapter->deviceProperties().limits.framebufferDepthSampleCounts;
+    auto availableFlags = m_adapter->deviceProperties().limits.framebufferColorSampleCounts
+                        & m_adapter->deviceProperties().limits.framebufferDepthSampleCounts;
 
     if (!(availableFlags & sampleFlags))
       return D3DERR_NOTAVAILABLE;
@@ -221,11 +305,15 @@ namespace dxvk {
     if (!IsDepthFormat(DepthStencilFormat))
       return D3DERR_NOTAVAILABLE;
 
+    auto dsfMapping = GetFormatMapping(DepthStencilFormat);
+    if (dsfMapping.FormatColor == VK_FORMAT_UNDEFINED)
+      return D3DERR_NOTAVAILABLE;
+
     if (RenderTargetFormat == dxvk::D3D9Format::NULL_FORMAT)
       return D3D_OK;
 
-    auto mapping = ConvertFormatUnfixed(RenderTargetFormat);
-    if (mapping.FormatColor == VK_FORMAT_UNDEFINED)
+    auto rtfMapping = GetFormatMapping(RenderTargetFormat);
+    if (rtfMapping.FormatColor == VK_FORMAT_UNDEFINED)
       return D3DERR_NOTAVAILABLE;
 
     return D3D_OK;
@@ -263,10 +351,21 @@ namespace dxvk {
           D3DCAPS9*  pCaps) {
     using namespace dxvk::caps;
 
-    if (pCaps == nullptr)
+    if (unlikely(pCaps == nullptr))
       return D3DERR_INVALIDCALL;
 
+    const bool isD3D8Compatible = m_parent->IsD3DCompatibile(D3DCompatibility::D3D8);
+
+    if (unlikely(DeviceType == D3DDEVTYPE_SW)) {
+      if (isD3D8Compatible)
+        return D3DERR_INVALIDCALL;
+      else
+        return D3DERR_NOTAVAILABLE;
+    }
+
     auto& options = m_parent->GetOptions();
+
+    const uint32_t maxShaderModel = isD3D8Compatible ? std::min(1u, options.shaderModel) : options.shaderModel;
 
     // TODO: Actually care about what the adapter supports here.
     // ^ For Intel and older cards most likely here.
@@ -300,7 +399,7 @@ namespace dxvk {
                                     | D3DPRESENT_INTERVAL_FOUR
                                     | D3DPRESENT_INTERVAL_IMMEDIATE;
     // Cursor
-    pCaps->CursorCaps               = D3DCURSORCAPS_COLOR; // I do not support Cursor yet, but I don't want to say I don't support it for compatibility reasons.
+    pCaps->CursorCaps               = D3DCURSORCAPS_COLOR;
     // Dev Caps
     pCaps->DevCaps                  = D3DDEVCAPS_EXECUTESYSTEMMEMORY
                                     | D3DDEVCAPS_EXECUTEVIDEOMEMORY
@@ -381,9 +480,13 @@ namespace dxvk {
                                     | D3DPBLENDCAPS_SRCALPHASAT
                                     | D3DPBLENDCAPS_BOTHSRCALPHA
                                     | D3DPBLENDCAPS_BOTHINVSRCALPHA
-                                    | D3DPBLENDCAPS_BLENDFACTOR
-                                    | D3DPBLENDCAPS_INVSRCCOLOR2
-                                    | D3DPBLENDCAPS_SRCCOLOR2;
+                                    | D3DPBLENDCAPS_BLENDFACTOR;
+
+    // Only 9Ex devices advertise D3DPBLENDCAPS_SRCCOLOR2 and D3DPBLENDCAPS_INVSRCCOLOR2
+    if (m_parent->IsD3DCompatibile(D3DCompatibility::D3D9Ex))
+      pCaps->SrcBlendCaps          |= D3DPBLENDCAPS_SRCCOLOR2
+                                    | D3DPBLENDCAPS_INVSRCCOLOR2;
+
     // Destination Blend Caps
     pCaps->DestBlendCaps            = pCaps->SrcBlendCaps;
     // Alpha Comparison Caps
@@ -526,7 +629,7 @@ namespace dxvk {
     // Max Vertex Blend Matrices
     pCaps->MaxVertexBlendMatrices    = 4;
     // Max Vertex Blend Matrix Index
-    pCaps->MaxVertexBlendMatrixIndex = 8;
+    pCaps->MaxVertexBlendMatrixIndex = 0;
     // Max Point Size
     pCaps->MaxPointSize              = 256.0f;
     // Max Primitive Count
@@ -538,17 +641,22 @@ namespace dxvk {
     // Max Stream Stride
     pCaps->MaxStreamStride           = 508; // bytes
 
-    const uint32_t majorVersion = options.shaderModel;
-    const uint32_t minorVersion = options.shaderModel != 1 ? 0 : 4;
+    // Late fixed-function capable cards, such as the GeForce 4 MX series,
+    // expose support for VS 1.1, while not advertising any PS support
+    const uint32_t majorVersionVS = maxShaderModel == 0 ? 1 : maxShaderModel;
+    const uint32_t majorVersionPS = maxShaderModel;
+    // Max supported SM1 is VS 1.1 and PS 1.4
+    const uint32_t minorVersionVS = majorVersionVS != 1 ? 0 : 1;
+    const uint32_t minorVersionPS = majorVersionPS != 1 ? 0 : 4;
 
     // Shader Versions
-    pCaps->VertexShaderVersion = D3DVS_VERSION(majorVersion, minorVersion);
-    pCaps->PixelShaderVersion  = D3DPS_VERSION(majorVersion, minorVersion);
+    pCaps->VertexShaderVersion = D3DVS_VERSION(majorVersionVS, minorVersionVS);
+    pCaps->PixelShaderVersion  = D3DPS_VERSION(majorVersionPS, minorVersionPS);
 
     // Max Vertex Shader Const
     pCaps->MaxVertexShaderConst       = MaxFloatConstantsVS;
     // Max PS1 Value
-    pCaps->PixelShader1xMaxValue      = FLT_MAX;
+    pCaps->PixelShader1xMaxValue      = maxShaderModel > 0 ? std::numeric_limits<float>::max() : 0.0f;
     // Dev Caps 2
     pCaps->DevCaps2                   = D3DDEVCAPS2_STREAMOFFSET
                                    /* | D3DDEVCAPS2_DMAPNPATCH */
@@ -561,7 +669,7 @@ namespace dxvk {
     pCaps->MaxNpatchTessellationLevel = 0.0f;
     // Reserved for... something
     pCaps->Reserved5                  = 0;
-    // Master adapter for us is adapter 0, atm... 
+    // Master adapter for us is adapter 0, atm...
     pCaps->MasterAdapterOrdinal       = 0;
     // The group of adapters this one is in
     pCaps->AdapterOrdinalInGroup      = 0;
@@ -595,34 +703,48 @@ namespace dxvk {
                                    /* | D3DPTFILTERCAPS_MAGFPYRAMIDALQUAD */
                                    /* | D3DPTFILTERCAPS_MAGFGAUSSIANQUAD */;
 
-    // Not too bothered about doing these longhand
-    // We should match whatever my AMD hardware reports here
-    // methinks for the best chance of stuff working.
-    pCaps->VS20Caps.Caps                     = 1;
-    pCaps->VS20Caps.DynamicFlowControlDepth  = 24;
-    pCaps->VS20Caps.NumTemps                 = 32;
-    pCaps->VS20Caps.StaticFlowControlDepth   = 4;
+    pCaps->VS20Caps.Caps                     = maxShaderModel >= 2 ? D3DVS20CAPS_PREDICATION : 0;
+    pCaps->VS20Caps.DynamicFlowControlDepth  = maxShaderModel >= 2 ? D3DVS20_MAX_DYNAMICFLOWCONTROLDEPTH : 0;
+    pCaps->VS20Caps.NumTemps                 = maxShaderModel >= 2 ? D3DVS20_MAX_NUMTEMPS : 0;
+    pCaps->VS20Caps.StaticFlowControlDepth   = maxShaderModel >= 2 ? D3DVS20_MAX_STATICFLOWCONTROLDEPTH : 0;
 
-    pCaps->PS20Caps.Caps                     = 31;
-    pCaps->PS20Caps.DynamicFlowControlDepth  = 24;
-    pCaps->PS20Caps.NumTemps                 = 32;
-    pCaps->PS20Caps.StaticFlowControlDepth   = 4;
+    pCaps->PS20Caps.Caps                     = maxShaderModel >= 2 ? D3DPS20CAPS_ARBITRARYSWIZZLE
+                                                                   | D3DPS20CAPS_GRADIENTINSTRUCTIONS
+                                                                   | D3DPS20CAPS_PREDICATION
+                                                                   | D3DPS20CAPS_NODEPENDENTREADLIMIT
+                                                                   | D3DPS20CAPS_NOTEXINSTRUCTIONLIMIT : 0;
+    pCaps->PS20Caps.DynamicFlowControlDepth  = maxShaderModel >= 2 ? D3DPS20_MAX_DYNAMICFLOWCONTROLDEPTH : 0;
+    pCaps->PS20Caps.NumTemps                 = maxShaderModel >= 2 ? D3DPS20_MAX_NUMTEMPS : 0;
+    pCaps->PS20Caps.StaticFlowControlDepth   = maxShaderModel >= 2 ? D3DPS20_MAX_STATICFLOWCONTROLDEPTH : 0;
+    pCaps->PS20Caps.NumInstructionSlots      = maxShaderModel >= 2 ? D3DPS20_MAX_NUMINSTRUCTIONSLOTS : 0;
 
-    pCaps->PS20Caps.NumInstructionSlots      = options.shaderModel >= 2 ? 512 : 256;
+    // Vertex texture samplers are only available as part of SM3, the caps are 0 otherwise.
+    pCaps->VertexTextureFilterCaps           = maxShaderModel == 3 ? D3DPTFILTERCAPS_MINFPOINT
+                                                                   | D3DPTFILTERCAPS_MINFLINEAR
+                                                                /* | D3DPTFILTERCAPS_MINFANISOTROPIC */
+                                                                /* | D3DPTFILTERCAPS_MINFPYRAMIDALQUAD */
+                                                                /* | D3DPTFILTERCAPS_MINFGAUSSIANQUAD */
+                                                                /* | D3DPTFILTERCAPS_MIPFPOINT */
+                                                                /* | D3DPTFILTERCAPS_MIPFLINEAR */
+                                                                /* | D3DPTFILTERCAPS_CONVOLUTIONMONO */
+                                                                   | D3DPTFILTERCAPS_MAGFPOINT
+                                                                   | D3DPTFILTERCAPS_MAGFLINEAR
+                                                                /* | D3DPTFILTERCAPS_MAGFANISOTROPIC */
+                                                                /* | D3DPTFILTERCAPS_MAGFPYRAMIDALQUAD */
+                                                                /* | D3DPTFILTERCAPS_MAGFGAUSSIANQUAD */ : 0;
 
-    pCaps->VertexTextureFilterCaps           = 50332416;
-    pCaps->MaxVShaderInstructionsExecuted    = 4294967295;
-    pCaps->MaxPShaderInstructionsExecuted    = 4294967295;
+    pCaps->MaxVShaderInstructionsExecuted    = maxShaderModel >= 2 ? 4294967295 : 0;
+    pCaps->MaxPShaderInstructionsExecuted    = maxShaderModel >= 2 ? 4294967295 : 0;
 
-    pCaps->MaxVertexShader30InstructionSlots = options.shaderModel == 3 ? 32768 : 0;
-    pCaps->MaxPixelShader30InstructionSlots  = options.shaderModel == 3 ? 32768 : 0;
+    pCaps->MaxVertexShader30InstructionSlots = maxShaderModel == 3 ? 32768 : 0;
+    pCaps->MaxPixelShader30InstructionSlots  = maxShaderModel == 3 ? 32768 : 0;
 
     return D3D_OK;
   }
 
 
   HMONITOR D3D9Adapter::GetMonitor() {
-    return GetDefaultMonitor();
+    return wsi::getDefaultMonitor();
   }
 
 
@@ -681,20 +803,14 @@ namespace dxvk {
     if (pRotation != nullptr)
       *pRotation = D3DDISPLAYROTATION_IDENTITY;
 
-    DEVMODEW devMode = DEVMODEW();
-    devMode.dmSize = sizeof(devMode);
+    wsi::WsiMode mode = { };
 
-    if (!GetMonitorDisplayMode(GetDefaultMonitor(), ENUM_CURRENT_SETTINGS, &devMode)) {
+    if (!wsi::getCurrentDisplayMode(wsi::getDefaultMonitor(), &mode)) {
       Logger::err("D3D9Adapter::GetAdapterDisplayModeEx: Failed to enum display settings");
       return D3DERR_INVALIDCALL;
     }
 
-    pMode->Size             = sizeof(D3DDISPLAYMODEEX);
-    pMode->Width            = devMode.dmPelsWidth;
-    pMode->Height           = devMode.dmPelsHeight;
-    pMode->RefreshRate      = devMode.dmDisplayFrequency;
-    pMode->Format           = D3DFMT_X8R8G8B8;
-    pMode->ScanLineOrdering = D3DSCANLINEORDERING_PROGRESSIVE;
+    *pMode = ConvertDisplayMode(mode);
     return D3D_OK;
   }
 
@@ -711,6 +827,16 @@ namespace dxvk {
       *pLUID = dxvk::GetAdapterLUID(m_ordinal);
 
     return D3D_OK;
+  }
+
+
+  void D3D9Adapter::RefreshFormatsTable() const {
+    m_d3d9Formats.RefreshFormatSupport(this);
+  }
+
+
+  bool D3D9Adapter::IsD3DCompatibile(D3DCompatibility d3dCompatibility) const {
+    return m_parent->IsD3DCompatibile(d3dCompatibility);
   }
 
 
@@ -769,47 +895,47 @@ namespace dxvk {
 
     // Walk over all modes that the display supports and
     // return those that match the requested format etc.
-    DEVMODEW devMode = { };
-    devMode.dmSize = sizeof(DEVMODEW);
+    wsi::WsiMode devMode = { };
 
     uint32_t modeIndex = 0;
 
     const auto forcedRatio = Ratio<DWORD>(options.forceAspectRatio);
 
-    while (GetMonitorDisplayMode(GetDefaultMonitor(), modeIndex++, &devMode)) {
+    while (wsi::getDisplayMode(wsi::getDefaultMonitor(), modeIndex++, &devMode)) {
       // Skip interlaced modes altogether
-      if (devMode.dmDisplayFlags & DM_INTERLACED)
+      if (devMode.interlaced)
         continue;
 
       // Skip modes with incompatible formats
-      if (devMode.dmBitsPerPel != GetMonitorFormatBpp(Format))
+      if (devMode.bitsPerPixel != GetMonitorFormatBpp(Format))
         continue;
 
-      if (!forcedRatio.undefined() && Ratio<DWORD>(devMode.dmPelsWidth, devMode.dmPelsHeight) != forcedRatio)
+      if (!forcedRatio.undefined() && Ratio<DWORD>(devMode.width, devMode.height) != forcedRatio)
         continue;
 
-      D3DDISPLAYMODEEX mode;
-      mode.Size             = sizeof(D3DDISPLAYMODEEX);
-      mode.Width            = devMode.dmPelsWidth;
-      mode.Height           = devMode.dmPelsHeight;
-      mode.RefreshRate      = devMode.dmDisplayFrequency;
-      mode.Format           = static_cast<D3DFORMAT>(Format);
-      mode.ScanLineOrdering = D3DSCANLINEORDERING_PROGRESSIVE;
+      if (options.forceRefreshRate &&
+          devMode.refreshRate.numerator / devMode.refreshRate.denominator != options.forceRefreshRate)
+        continue;
+
+      D3DDISPLAYMODEEX mode = ConvertDisplayMode(devMode);
+      // Fix up the D3DFORMAT to match what we are enumerating
+      mode.Format = static_cast<D3DFORMAT>(Format);
 
       m_modes.push_back(mode);
     }
 
-    // Sort display modes by width, height and refresh rate,
-    // in that order. Some games rely on correct ordering.
+    // Sort display modes by width, height and refresh rate (descending), in that order.
+    // Some games rely on correct ordering, e.g. Prince of Persia (2008) expects the highest
+    // refresh rate to be listed first for a particular resolution.
     std::sort(m_modes.begin(), m_modes.end(),
       [](const D3DDISPLAYMODEEX& a, const D3DDISPLAYMODEEX& b) {
         if (a.Width < b.Width)   return true;
         if (a.Width > b.Width)   return false;
-        
+
         if (a.Height < b.Height) return true;
         if (a.Height > b.Height) return false;
-        
-        return a.RefreshRate < b.RefreshRate;
+
+        return a.RefreshRate > b.RefreshRate;
     });
   }
 

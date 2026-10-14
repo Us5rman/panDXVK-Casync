@@ -2,7 +2,7 @@
 #include "dxvk_instance.h"
 
 namespace dxvk {
-  
+
   DxvkDevice::DxvkDevice(
     const Rc<DxvkInstance>&         instance,
     const Rc<DxvkAdapter>&          adapter,
@@ -36,6 +36,13 @@ namespace dxvk {
     // that would otherwise be attributed to the session.
     m_report.endSession(this);
 
+    // If we are being destroyed during/after DLL process detachment
+    // from TerminateProcess, etc, our CS threads are already destroyed
+    // and we cannot synchronize against them.
+    // The best we can do is just wait for the Vulkan device to be idle.
+    if (this_thread::isInModuleDetachment())
+      return;
+
     // Wait for all pending Vulkan commands to be
     // executed before we destroy any resources.
     this->waitForIdle();
@@ -63,10 +70,10 @@ namespace dxvk {
     VkPipelineStageFlags result = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
                                 | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
                                 | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    
+
     if (m_features.core.features.geometryShader)
       result |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
-    
+
     if (m_features.core.features.tessellationShader) {
       result |= VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT
              |  VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
@@ -82,14 +89,14 @@ namespace dxvk {
     options.maxNumDynamicStorageBuffers = m_properties.core.properties.limits.maxDescriptorSetStorageBuffersDynamic;
     return options;
   }
-  
-  
+
+
   Rc<DxvkCommandList> DxvkDevice::createCommandList() {
     Rc<DxvkCommandList> cmdList = m_recycledCommandLists.retrieveObject();
-    
+
     if (cmdList == nullptr)
       cmdList = new DxvkCommandList(this);
-    
+
     return cmdList;
   }
 
@@ -99,11 +106,11 @@ namespace dxvk {
 
     if (pool == nullptr)
       pool = new DxvkDescriptorPool(m_vkd);
-    
+
     return pool;
   }
-  
-  
+
+
   Rc<DxvkContext> DxvkDevice::createContext() {
     return new DxvkContext(this);
   }
@@ -120,63 +127,63 @@ namespace dxvk {
           uint32_t              index) {
     return new DxvkGpuQuery(m_vkd, type, flags, index);
   }
-  
-  
+
+
   Rc<DxvkFence> DxvkDevice::createFence(
     const DxvkFenceCreateInfo& fenceInfo) {
     return new DxvkFence(this, fenceInfo);
   }
-  
-  
+
+
   Rc<DxvkFramebuffer> DxvkDevice::createFramebuffer(
     const DxvkFramebufferInfo&  info) {
     return new DxvkFramebuffer(m_vkd, info);
   }
-  
-  
+
+
   Rc<DxvkBuffer> DxvkDevice::createBuffer(
     const DxvkBufferCreateInfo& createInfo,
           VkMemoryPropertyFlags memoryType) {
     return new DxvkBuffer(this, createInfo, m_objects.memoryManager(), memoryType);
   }
-  
-  
+
+
   Rc<DxvkBufferView> DxvkDevice::createBufferView(
     const Rc<DxvkBuffer>&           buffer,
     const DxvkBufferViewCreateInfo& createInfo) {
     return new DxvkBufferView(m_vkd, buffer, createInfo);
   }
-  
-  
+
+
   Rc<DxvkImage> DxvkDevice::createImage(
     const DxvkImageCreateInfo&  createInfo,
           VkMemoryPropertyFlags memoryType) {
     return new DxvkImage(this, createInfo, m_objects.memoryManager(), memoryType);
   }
-  
-  
+
+
   Rc<DxvkImage> DxvkDevice::createImageFromVkImage(
     const DxvkImageCreateInfo&  createInfo,
           VkImage               image) {
     return new DxvkImage(this, createInfo, image);
   }
-  
+
   Rc<DxvkImageView> DxvkDevice::createImageView(
     const Rc<DxvkImage>&            image,
     const DxvkImageViewCreateInfo&  createInfo) {
     return new DxvkImageView(m_vkd, image, createInfo);
   }
-  
-  
+
+
   Rc<DxvkSampler> DxvkDevice::createSampler(
     const DxvkSamplerCreateInfo&  createInfo) {
     return new DxvkSampler(this, createInfo);
   }
-  
-  
+
+
   DxvkStatCounters DxvkDevice::getStatCounters() {
     DxvkPipelineCount pipe = m_objects.pipelineManager().getPipelineCount();
-    
+
     DxvkStatCounters result;
     result.setCtr(DxvkStatCounter::PipeCountGraphics, pipe.numGraphicsPipelines);
     result.setCtr(DxvkStatCounter::PipeCountCompute,  pipe.numComputePipelines);
@@ -187,8 +194,8 @@ namespace dxvk {
     result.merge(m_statCounters);
     return result;
   }
-  
-  
+
+
   DxvkMemoryStats DxvkDevice::getMemoryStats(uint32_t heap) {
     return m_objects.memoryManager().getMemoryStats(heap);
   }
@@ -197,8 +204,8 @@ namespace dxvk {
   uint32_t DxvkDevice::getCurrentFrameId() const {
     return m_statCounters.getCtr(DxvkStatCounter::QueuePresentCount);
   }
-  
-  
+
+
   void DxvkDevice::initResources() {
     m_objects.dummyResources().clearResources(this);
   }
@@ -207,8 +214,8 @@ namespace dxvk {
   void DxvkDevice::registerShader(const Rc<DxvkShader>& shader) {
     m_objects.pipelineManager().registerShader(shader);
   }
-  
-  
+
+
   void DxvkDevice::presentImage(
     const Rc<vk::Presenter>&        presenter,
           DxvkSubmitStatus*         status) {
@@ -247,8 +254,8 @@ namespace dxvk {
     m_statCounters.merge(commandList->statCounters());
     m_statCounters.addCtr(DxvkStatCounter::QueueSubmitCount, 1);
   }
-  
-  
+
+
   VkResult DxvkDevice::waitForSubmission(DxvkSubmitStatus* status) {
     VkResult result = status->result.load();
 
@@ -277,16 +284,16 @@ namespace dxvk {
       m_statCounters.addCtr(DxvkStatCounter::GpuSyncTicks, us.count());
     }
   }
-  
-  
+
+
   void DxvkDevice::waitForIdle() {
     this->lockSubmission();
     if (m_vkd->vkDeviceWaitIdle(m_vkd->device()) != VK_SUCCESS)
       Logger::err("DxvkDevice: waitForIdle: Operation failed");
     this->unlockSubmission();
   }
-  
-  
+
+
   DxvkDevicePerfHints DxvkDevice::getPerfHints() {
     DxvkDevicePerfHints hints;
     hints.preferFbDepthStencilCopy = m_extensions.extShaderStencilExport
@@ -296,6 +303,22 @@ namespace dxvk {
     hints.preferFbResolve = m_extensions.amdShaderFragmentMask
       && (m_adapter->matchesDriver(DxvkGpuVendor::Amd, VK_DRIVER_ID_AMD_OPEN_SOURCE_KHR, 0, 0)
        || m_adapter->matchesDriver(DxvkGpuVendor::Amd, VK_DRIVER_ID_AMD_PROPRIETARY_KHR, 0, 0));
+
+    // Detect tiler GPUs. Currently only used to prefer cached memory
+    // for host-visible allocations; render-pass handling is a todo.
+    bool tilerMode = m_adapter->matchesDriver(VK_DRIVER_ID_MESA_TURNIP)
+      || m_adapter->matchesDriver(VK_DRIVER_ID_QUALCOMM_PROPRIETARY)
+      || m_adapter->matchesDriver(VK_DRIVER_ID_MESA_HONEYKRISP)
+      || m_adapter->matchesDriver(VK_DRIVER_ID_MOLTENVK)
+      || m_adapter->matchesDriver(VK_DRIVER_ID_MESA_PANVK)
+      || m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)
+      || m_adapter->matchesDriver(VK_DRIVER_ID_MESA_V3DV)
+      || m_adapter->matchesDriver(VK_DRIVER_ID_BROADCOM_PROPRIETARY)
+      || m_adapter->matchesDriver(VK_DRIVER_ID_IMAGINATION_OPEN_SOURCE_MESA)
+      || m_adapter->matchesDriver(VK_DRIVER_ID_IMAGINATION_PROPRIETARY);
+
+    applyTristate(tilerMode, m_options.tilerMode);
+    hints.preferCachedMemory = tilerMode;
     return hints;
   }
 
@@ -303,7 +326,7 @@ namespace dxvk {
   void DxvkDevice::recycleCommandList(const Rc<DxvkCommandList>& cmdList) {
     m_recycledCommandLists.returnObject(cmdList);
   }
-  
+
 
   void DxvkDevice::recycleDescriptorPool(const Rc<DxvkDescriptorPool>& pool) {
     m_recycledDescriptorPools.returnObject(pool);
@@ -314,8 +337,11 @@ namespace dxvk {
           uint32_t                family,
           uint32_t                index) const {
     VkQueue queue = VK_NULL_HANDLE;
-    m_vkd->vkGetDeviceQueue(m_vkd->device(), family, index, &queue);
+
+    if (family != VK_QUEUE_FAMILY_IGNORED)
+      m_vkd->vkGetDeviceQueue(m_vkd->device(), family, index, &queue);
+
     return DxvkDeviceQueue { queue, family, index };
   }
-  
+
 }

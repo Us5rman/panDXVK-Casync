@@ -58,8 +58,10 @@ dxvk_shaders = files([
   'hud/shaders/hud_text_vert.vert',
 ])
 
-dxvk_src = files([
+dxvk_src = [
   'dxvk_adapter.cpp',
+  'dxvk_allocator.cpp',
+  'dxvk_asynccompiler.cpp',
   'dxvk_barrier.cpp',
   'dxvk_buffer.cpp',
   'dxvk_cmdlist.cpp',
@@ -74,6 +76,9 @@ dxvk_src = files([
   'dxvk_fence.cpp',
   'dxvk_format.cpp',
   'dxvk_framebuffer.cpp',
+
+  'framepacer/dxvk_framepacer.cpp',
+
   'dxvk_gpu_event.cpp',
   'dxvk_gpu_query.cpp',
   'dxvk_graphics.cpp',
@@ -93,6 +98,7 @@ dxvk_src = files([
   'dxvk_options.cpp',
   'dxvk_pandxvk_report.cpp',
   'dxvk_pipecache.cpp',
+  'dxvk_pipecompiler.cpp',
   'dxvk_pipelayout.cpp',
   'dxvk_pipemanager.cpp',
   'dxvk_pipecompiler.cpp',
@@ -117,7 +123,7 @@ dxvk_src = files([
   'hud/dxvk_hud_font.cpp',
   'hud/dxvk_hud_item.cpp',
   'hud/dxvk_hud_renderer.cpp',
-])
+]
 
 thread_dep = dependency('threads')
 
@@ -125,8 +131,8 @@ thread_dep = dependency('threads')
 # sources so meson wires the generated headers into this target; both are
 # consumed by dxvk_instance.cpp and hud/dxvk_hud_item.cpp below.
 dxvk_lib = static_library('dxvk', dxvk_src, glsl_generator.process(dxvk_shaders), dxvk_version, pandxvk_commit,
-  link_with           : [ util_lib, spirv_lib ],
-  dependencies        : [ thread_dep, vkcommon_dep ] + dxvk_extradep,
+  link_with           : [ util_lib, spirv_lib, wsi_lib ],
+  dependencies        : [ thread_dep, vkcommon_dep ],
   include_directories : [ dxvk_include_path ],
 )
 

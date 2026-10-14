@@ -2,7 +2,7 @@
 
 panDXVK is a specialized DXVK translation layer built exclusively for the panVK (Panfrost / ARM Mali Vulkan) driver.
 
-Based on [DXVK v1.10.3](https://github.com/doitsujin/dxvk/tree/v1.10.3), forked from [pythonlover02/dxvk-sarek](https://github.com/pythonlover02/dxvk-sarek). Adds a BC texture → ASTC 4x4 transcode pipeline so that PC games using BC1–BC7 compressed textures can render correctly on Mali GPUs. PanVK does not report `textureCompressionBC`; where a wrapper advertises it back instead, the transcode is activated with `PANDXVK_FORCE_TRANSCODE=1`.
+Based on [DXVK v1.14.1](https://github.com/doitsujin/dxvk/tree/v1.14.1), forked from [pythonlover02/dxvk-sarek](https://github.com/pythonlover02/dxvk-sarek). Adds a BC texture → ASTC 4x4 transcode pipeline so that PC games using BC1–BC7 compressed textures can render correctly on Mali GPUs. PanVK does not report `textureCompressionBC`; where a wrapper advertises it back instead, the transcode is activated with `PANDXVK_FORCE_TRANSCODE=1`.
 
 ## Key Features
 - **BC→ASTC Transcode**: Software decode of BC1–BC7 to RGBA8, then encode to ASTC 4x4. Mali hardware decodes ASTC natively.
@@ -141,5 +141,5 @@ Reported by testers in the field — recorded here as observed, not independentl
 ## Upstream DXVK Reference
 - Upstream DXVK: [doitsujin/dxvk](https://github.com/doitsujin/dxvk)
 - DXVK Sarek: [pythonlover02/dxvk-sarek](https://github.com/pythonlover02/dxvk-sarek)
-- Forked from: [pythonlover02/dxvk-sarek@v1.10.3](https://github.com/pythonlover02/dxvk-sarek/tree/v1.10.3)
+- Forked from: [pythonlover02/dxvk-sarek@v1.14.1](https://github.com/pythonlover02/dxvk-sarek/tree/v1.14.1)
 - Upstream latest: [v3.1](https://github.com/doitsujin/dxvk/releases/tag/v3.1)

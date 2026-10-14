@@ -4,6 +4,7 @@
 
 #include "d3d9_options.h"
 #include "d3d9_format.h"
+#include "d3d9_bridge.h"
 
 #include "../dxvk/dxvk_adapter.h"
 
@@ -87,6 +88,10 @@ namespace dxvk {
       return m_d3d9Formats.GetUnsupportedFormatInfo(Format);
     }
 
+    void RefreshFormatsTable() const;
+
+    bool IsD3DCompatibile(D3DCompatibility d3dCompatibility) const;
+
   private:
 
     HRESULT CheckDeviceVkFormat(
@@ -105,7 +110,7 @@ namespace dxvk {
     std::vector<D3DDISPLAYMODEEX> m_modes;
     D3D9Format                    m_modeCacheFormat;
 
-    const D3D9VkFormatTable       m_d3d9Formats;
+    mutable D3D9VkFormatTable     m_d3d9Formats;
 
   };
 

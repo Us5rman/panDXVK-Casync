@@ -4,6 +4,7 @@
 #include <d3d9_convert_l6v5u5.h>
 #include <d3d9_convert_x8l8v8u8.h>
 #include <d3d9_convert_a2w10v10u10.h>
+#include <d3d9_convert_w11v11u10.h>
 #include <d3d9_convert_nv12.h>
 #include <d3d9_convert_yv12.h>
 
@@ -57,6 +58,10 @@ namespace dxvk {
         ConvertGenericFormat(conversionFormat, dstImage, dstSubresource, srcSlice, VK_FORMAT_R32_UINT, 0, { 1u, 1u });
         break;
 
+      case D3D9ConversionFormat_W11V11U10:
+        ConvertGenericFormat(conversionFormat, dstImage, dstSubresource, srcSlice, VK_FORMAT_R32_UINT, 0, { 1u, 1u });
+        break;
+
       default:
         Logger::warn("Unimplemented format conversion");
     }
@@ -93,9 +98,7 @@ namespace dxvk {
     bufferViewInfo.rangeLength = srcSlice.length();
     auto tmpBufferView = m_device->createBufferView(srcSlice.buffer(), bufferViewInfo);
 
-    if (specConstantValue)
-      m_context->setSpecConstant(VK_PIPELINE_BIND_POINT_COMPUTE, 0, specConstantValue);
-
+    m_context->setSpecConstant(VK_PIPELINE_BIND_POINT_COMPUTE, 0, specConstantValue);
     m_context->bindResourceView(BindingIds::Image,  tmpImageView, nullptr);
     m_context->bindResourceView(BindingIds::Buffer, nullptr,     tmpBufferView);
     m_context->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, m_shaders[videoFormat.FormatType]);
@@ -108,7 +111,7 @@ namespace dxvk {
     // Reset the spec constants used...
     if (specConstantValue)
       m_context->setSpecConstant(VK_PIPELINE_BIND_POINT_COMPUTE, 0, 0);
-    
+
     m_transferCommands += 1;
   }
 
@@ -119,6 +122,7 @@ namespace dxvk {
     m_shaders[D3D9ConversionFormat_L6V5U5] = InitShader(d3d9_convert_l6v5u5);
     m_shaders[D3D9ConversionFormat_X8L8V8U8] = InitShader(d3d9_convert_x8l8v8u8);
     m_shaders[D3D9ConversionFormat_A2W10V10U10] = InitShader(d3d9_convert_a2w10v10u10);
+    m_shaders[D3D9ConversionFormat_W11V11U10] = InitShader(d3d9_convert_w11v11u10);
     m_shaders[D3D9ConversionFormat_NV12] = InitShader(d3d9_convert_nv12);
     m_shaders[D3D9ConversionFormat_YV12] = InitShader(d3d9_convert_yv12);
   }
@@ -143,7 +147,7 @@ namespace dxvk {
 
   void D3D9FormatHelper::FlushInternal() {
     m_context->flushCommandList();
-    
+
     m_transferCommands = 0;
   }
 

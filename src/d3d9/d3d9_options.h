@@ -22,6 +22,19 @@ namespace dxvk {
     int32_t customDeviceId;
     std::string customDeviceDesc;
 
+    /// Reports Nvidia GPUs running on the proprietary driver as a different
+    /// vendor (usually AMD)
+    bool hideNvidiaGpu;
+
+    /// Reports Nvidia GPUs running on NVK as a different vendor (usually AMD)
+    bool hideNvkGpu;
+
+    /// Reports AMD GPUs as a different vendor (usually Nvidia)
+    bool hideAmdGpu;
+
+    /// Reports Intel GPUs as a different vendor (usually AMD)
+    bool hideIntelGpu;
+
     /// Present interval. Overrides the value
     /// in D3DPRESENT_PARAMS used in swapchain present.
     int32_t presentInterval;
@@ -34,7 +47,7 @@ namespace dxvk {
     int32_t maxFrameRate;
 
     /// Set the max shader model the device can support in the caps.
-    int32_t shaderModel;
+    uint32_t shaderModel;
 
     /// Whether or not managed resources should stay in memory until unlock, or until manually evicted.
     bool evictManagedOnUnlock;
@@ -89,6 +102,9 @@ namespace dxvk {
     /// D3D9 Floating Point Emulation (anything * 0 = 0)
     D3D9FloatEmulation d3d9FloatEmulation;
 
+    /// Support depth formats for cube textures
+    bool supportCubeDepthFormats;
+
     /// Support the DF16 & DF24 texture format
     bool supportDFFormats;
 
@@ -97,6 +113,9 @@ namespace dxvk {
 
     /// Support D32
     bool supportD32;
+
+    /// Use D32f for D24
+    bool useD32forD24;
 
     /// Disable D3DFMT_A8 for render targets.
     /// Specifically to work around a game
@@ -117,12 +136,19 @@ namespace dxvk {
     /// Forced aspect ratio, disable other modes
     std::string forceAspectRatio;
 
+    /// Forced refresh rate, disable other modes
+    uint32_t forceRefreshRate;
+
     /// Enable dialog mode (ie. no exclusive fullscreen)
     bool enableDialogMode;
 
     /// Always use a spec constant to determine sampler type (instead of just in PS 1.x)
     /// Works around a game bug in Halo CE where it gives cube textures to 2d/volume samplers
     bool forceSamplerTypeSpecConstants;
+
+    /// Give each sampler image variable its own binding.
+    /// Required on MoltenVK, Metal cannot alias them.
+    bool splitSamplerSlots;
 
     /// Forces an MSAA level on the swapchain
     int32_t forceSwapchainMSAA;
@@ -149,8 +175,8 @@ namespace dxvk {
     /// misc. imprecision on some vendors
     bool alphaTestWiggleRoom;
 
-    /// Apitrace mode: Maps all buffers in cached memory.
-    bool apitraceMode;
+    /// Cached dynamic buffers: Maps all buffers in cached memory.
+    bool cachedDynamicBuffers;
 
     /// Use device local memory for constant buffers.
     bool deviceLocalConstantBuffers;
@@ -160,6 +186,9 @@ namespace dxvk {
 
     /// Don't use non seamless cube maps
     bool seamlessCubes;
+
+    /// Enable depth texcoord Z (Dref) scaling (D3D8 quirk)
+    int32_t drefScaling;
   };
 
 }

@@ -91,7 +91,7 @@ namespace dxvk {
     pDesc->Type               = D3DRTYPE_SURFACE;
     pDesc->Usage              = desc.Usage;
     pDesc->Pool               = desc.Pool;
-    
+
     pDesc->MultiSampleType    = desc.MultiSample;
     pDesc->MultiSampleQuality = desc.MultisampleQuality;
     pDesc->Width              = std::max(1u, desc.Width >> m_mipLevel);
@@ -122,6 +122,8 @@ namespace dxvk {
       &lockedBox,
       pRect != nullptr ? &box : nullptr,
       Flags);
+
+    if (FAILED(hr)) return hr;
 
     pLockedRect->pBits = lockedBox.pBits;
     pLockedRect->Pitch = lockedBox.RowPitch;
@@ -160,7 +162,9 @@ namespace dxvk {
     createInfo.hBitmap     = nullptr;
     createInfo.hDc         = nullptr;
 
-    D3DKMTCreateDCFromMemory(&createInfo);
+    if (D3DKMTCreateDCFromMemory(&createInfo))
+      Logger::err("D3D9: Failed to create GDI DC");
+
     DeleteDC(createInfo.hDeviceDc);
 
     // These should now be set...

@@ -25,7 +25,7 @@ namespace dxvk {
     static constexpr DWORD AlphaToCoverageDisabled = MAKEFOURCC('A', '2', 'M', '0');
     static constexpr DWORD AlphaToCoverageEnabled  = MAKEFOURCC('A', '2', 'M', '1');
   }
-  
+
   struct D3D9ClipPlane {
     float coeff[4] = {};
   };
@@ -159,7 +159,7 @@ namespace dxvk {
       float Padding[2];
     } Stages[8];
   };
-  
+
   struct D3D9VBO {
     Com<D3D9VertexBuffer, false> vertexBuffer;
 
@@ -169,11 +169,11 @@ namespace dxvk {
 
   constexpr D3DLIGHT9 DefaultLight = {
     D3DLIGHT_DIRECTIONAL,     // Type
-    {1.0f, 1.0f, 1.0f, 1.0f}, // Diffuse
+    {1.0f, 1.0f, 1.0f, 0.0f}, // Diffuse
     {0.0f, 0.0f, 0.0f, 0.0f}, // Specular
     {0.0f, 0.0f, 0.0f, 0.0f}, // Ambient
     {0.0f, 0.0f, 0.0f},       // Position
-    {0.0f, 0.0f, 0.0f},       // Direction
+    {0.0f, 0.0f, 1.0f},       // Direction
     0.0f,                     // Range
     0.0f,                     // Falloff
     0.0f, 0.0f, 0.0f,         // Attenuations [constant, linear, quadratic]
@@ -207,6 +207,8 @@ namespace dxvk {
     D3DVIEWPORT9                                     viewport = {};
     RECT                                             scissorRect = {};
 
+    D3DCLIPSTATUS9                                   clipStatus = {0, 0xffffffff};
+
     std::array<
       D3D9ClipPlane,
       caps::MaxClipPlanes>                           clipPlanes = {};
@@ -226,6 +228,8 @@ namespace dxvk {
 
     std::vector<std::optional<D3DLIGHT9>>            lights;
     std::array<DWORD, caps::MaxEnabledLights>        enabledLightIndices;
+
+    float                                            nPatchSegments = 0.0f;
 
     bool IsLightEnabled(DWORD Index) {
       const auto& indices = enabledLightIndices;

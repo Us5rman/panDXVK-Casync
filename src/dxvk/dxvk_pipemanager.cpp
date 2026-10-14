@@ -1,11 +1,13 @@
 #include <algorithm>
 
 #include "dxvk_device.h"
+#include "dxvk_pipecompiler.h"
 #include "dxvk_pipemanager.h"
 #include "dxvk_state_cache.h"
 
+
 namespace dxvk {
-  
+
   DxvkPipelineManager::DxvkPipelineManager(
           DxvkDevice*         device,
           DxvkRenderPassPool* passManager)
@@ -123,19 +125,56 @@ namespace dxvk {
     return &iter.first->second;
   }
 
-  
+
+  DxvkPipelineManager::~DxvkPipelineManager() = default;
+
+
+  DxvkComputePipeline* DxvkPipelineManager::createComputePipeline(
+          const DxvkComputePipelineShaders& shaders) {
+    return shaders.cs == nullptr
+      ? nullptr
+      : findOrCreateComputePipeline(shaders);
+  }
+
+
+  DxvkComputePipeline* DxvkPipelineManager::findOrCreateComputePipeline(
+          const DxvkComputePipelineShaders& shaders) {
+    std::lock_guard<dxvk::mutex> lock(m_mutex);
+
+    return &m_computePipelines.try_emplace(shaders, this, shaders).first->second;
+  }
+
+
+  DxvkGraphicsPipeline* DxvkPipelineManager::createGraphicsPipeline(
+          const DxvkGraphicsPipelineShaders& shaders) {
+    return shaders.vs == nullptr
+      ? nullptr
+      : findOrCreateGraphicsPipeline(shaders);
+  }
+
+
+  DxvkGraphicsPipeline* DxvkPipelineManager::findOrCreateGraphicsPipeline(
+          const DxvkGraphicsPipelineShaders& shaders) {
+    std::lock_guard<dxvk::mutex> lock(m_mutex);
+
+    return &m_graphicsPipelines.try_emplace(shaders, this, shaders).first->second;
+  }
+
+
   void DxvkPipelineManager::registerShader(
-    const Rc<DxvkShader>&         shader) {
-    if (m_stateCache != nullptr)
-      m_stateCache->registerShader(shader);
+          const Rc<DxvkShader>& shader) {
+    switch (m_stateCache != nullptr) {
+      case true:  m_stateCache->registerShader(shader); break;
+      case false: break;
+    }
   }
 
 
   DxvkPipelineCount DxvkPipelineManager::getPipelineCount() const {
     DxvkPipelineCount result;
-    result.numComputePipelines  = m_numComputePipelines.load();
-    result.numGraphicsPipelines = m_numGraphicsPipelines.load();
-    return result;
+      result.numGraphicsPipelines = m_numGraphicsPipelines.load();
+      result.numComputePipelines  = m_numComputePipelines.load();
+      return result;
   }
 
 
@@ -152,5 +191,5 @@ namespace dxvk {
     if (m_compiler != nullptr)
       m_compiler->stopWorkerThreads();
   }
-  
+
 }

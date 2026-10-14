@@ -2,6 +2,8 @@
 
 #include "../dxvk/dxvk_format.h"
 
+#include "../wsi/wsi_window.h"
+
 namespace dxvk::vk {
 
   Presenter::Presenter(
@@ -26,7 +28,7 @@ namespace dxvk::vk {
       throw DxvkError("Failed to create swap chain");
   }
 
-  
+
   Presenter::~Presenter() {
     destroySwapchain();
     destroySurface();
@@ -52,10 +54,10 @@ namespace dxvk::vk {
         m_swapchain, std::numeric_limits<uint64_t>::max(),
         sync.acquire, VK_NULL_HANDLE, &m_imageIndex);
     }
-    
+
     if (m_acquireStatus != VK_SUCCESS && m_acquireStatus != VK_SUBOPTIMAL_KHR)
       return m_acquireStatus;
-    
+
     index = m_imageIndex;
     return m_acquireStatus;
   }
@@ -97,7 +99,7 @@ namespace dxvk::vk {
     return status;
   }
 
-  
+
   VkResult Presenter::recreateSwapChain(const PresenterDesc& desc) {
     if (m_swapchain)
       destroySwapchain();
@@ -110,7 +112,7 @@ namespace dxvk::vk {
     std::vector<VkPresentModeKHR>   modes;
 
     VkResult status;
-    
+
     if ((status = m_vki->vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
         m_device.adapter, m_surface, &caps)) != VK_SUCCESS) {
       if (status == VK_ERROR_SURFACE_LOST_KHR) {
@@ -176,21 +178,22 @@ namespace dxvk::vk {
     Logger::info(str::format(
       "Presenter: Actual swap chain properties:"
       "\n  Format:       ", m_info.format.format,
+      "\n  Color space:  ", m_info.format.colorSpace,
       "\n  Present mode: ", m_info.presentMode,
       "\n  Buffer size:  ", m_info.imageExtent.width, "x", m_info.imageExtent.height,
       "\n  Image count:  ", m_info.imageCount,
       "\n  Exclusive FS: ", desc.fullScreenExclusive));
-    
+
     if ((status = m_vkd->vkCreateSwapchainKHR(m_vkd->device(),
         &swapInfo, nullptr, &m_swapchain)) != VK_SUCCESS)
       return status;
-    
+
     // Acquire images and create views
     std::vector<VkImage> images;
 
     if ((status = getSwapImages(images)) != VK_SUCCESS)
       return status;
-    
+
     // Update actual image count
     m_info.imageCount = images.size();
     m_images.resize(m_info.imageCount);
@@ -211,7 +214,7 @@ namespace dxvk::vk {
       viewInfo.subresourceRange = {
         VK_IMAGE_ASPECT_COLOR_BIT,
         0, 1, 0, 1 };
-      
+
       if ((status = m_vkd->vkCreateImageView(m_vkd->device(),
           &viewInfo, nullptr, &m_images[i].view)) != VK_SUCCESS)
         return status;
@@ -234,7 +237,7 @@ namespace dxvk::vk {
           &semInfo, nullptr, &m_semaphores[i].present)) != VK_SUCCESS)
         return status;
     }
-    
+
     // Invalidate indices
     m_imageIndex = 0;
     m_frameIndex = 0;
@@ -245,11 +248,6 @@ namespace dxvk::vk {
 
   void Presenter::setFrameRateLimit(double frameRate) {
     m_fpsLimiter.setTargetFrameRate(frameRate);
-  }
-
-
-  void Presenter::setFrameRateLimiterRefreshRate(double refreshRate) {
-    m_fpsLimiter.setDisplayRefreshRate(refreshRate);
   }
 
 
@@ -267,7 +265,7 @@ namespace dxvk::vk {
     surfaceInfo.surface = m_surface;
 
     VkResult status;
-    
+
     if (m_device.features.fullScreenExclusive) {
       status = m_vki->vkGetPhysicalDeviceSurfaceFormats2KHR(
         m_device.adapter, &surfaceInfo, &numFormats, nullptr);
@@ -278,11 +276,11 @@ namespace dxvk::vk {
 
     if (status != VK_SUCCESS)
       return status;
-    
+
     formats.resize(numFormats);
 
     if (m_device.features.fullScreenExclusive) {
-      std::vector<VkSurfaceFormat2KHR> tmpFormats(numFormats, 
+      std::vector<VkSurfaceFormat2KHR> tmpFormats(numFormats,
         { VK_STRUCTURE_TYPE_SURFACE_FORMAT_2_KHR, nullptr, VkSurfaceFormatKHR() });
 
       status = m_vki->vkGetPhysicalDeviceSurfaceFormats2KHR(
@@ -298,7 +296,7 @@ namespace dxvk::vk {
     return status;
   }
 
-  
+
   VkResult Presenter::getSupportedPresentModes(std::vector<VkPresentModeKHR>& modes, const PresenterDesc& desc) {
     uint32_t numModes = 0;
 
@@ -324,7 +322,7 @@ namespace dxvk::vk {
 
     if (status != VK_SUCCESS)
       return status;
-    
+
     modes.resize(numModes);
 
     if (m_device.features.fullScreenExclusive) {
@@ -344,10 +342,10 @@ namespace dxvk::vk {
 
     VkResult status = m_vkd->vkGetSwapchainImagesKHR(
       m_vkd->device(), m_swapchain, &imageCount, nullptr);
-    
+
     if (status != VK_SUCCESS)
       return status;
-    
+
     images.resize(imageCount);
 
     return m_vkd->vkGetSwapchainImagesKHR(
@@ -365,7 +363,7 @@ namespace dxvk::vk {
       // the format, we'll just use the preferred format.
       if (numSupported == 1 && pSupported[0].format == VK_FORMAT_UNDEFINED)
         return pDesired[0];
-      
+
       // If the preferred format is explicitly listed in
       // the array of supported surface formats, use it
       for (uint32_t i = 0; i < numDesired; i++) {
@@ -388,7 +386,7 @@ namespace dxvk::vk {
           return pSupported[j];
       }
     }
-    
+
     // Otherwise, fall back to the first supported format
     return pSupported[0];
   }
@@ -406,7 +404,7 @@ namespace dxvk::vk {
           return pSupported[j];
       }
     }
-    
+
     // Guaranteed to be available
     return VK_PRESENT_MODE_FIFO_KHR;
   }
@@ -417,7 +415,7 @@ namespace dxvk::vk {
           VkExtent2D                desired) {
     if (caps.currentExtent.width != std::numeric_limits<uint32_t>::max())
       return caps.currentExtent;
-    
+
     VkExtent2D actual;
     actual.width  = clamp(desired.width,  caps.minImageExtent.width,  caps.maxImageExtent.width);
     actual.height = clamp(desired.height, caps.minImageExtent.height, caps.maxImageExtent.height);
@@ -430,43 +428,35 @@ namespace dxvk::vk {
           VkPresentModeKHR          presentMode,
           uint32_t                  desired) {
     uint32_t count = caps.minImageCount;
-    
+
     if (presentMode != VK_PRESENT_MODE_IMMEDIATE_KHR)
       count = caps.minImageCount + 1;
-    
+
     if (count < desired)
       count = desired;
-    
+
     if (count > caps.maxImageCount && caps.maxImageCount != 0)
       count = caps.maxImageCount;
-    
+
     return count;
   }
 
 
   VkResult Presenter::createSurface() {
-    HINSTANCE instance = reinterpret_cast<HINSTANCE>(
-      GetWindowLongPtr(m_window, GWLP_HINSTANCE));
-    
-    VkWin32SurfaceCreateInfoKHR info;
-    info.sType      = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-    info.pNext      = nullptr;
-    info.flags      = 0;
-    info.hinstance  = instance;
-    info.hwnd       = m_window;
-    
-    VkResult status = m_vki->vkCreateWin32SurfaceKHR(
-      m_vki->instance(), &info, nullptr, &m_surface);
-    
+    VkResult status = wsi::createSurface(m_window,
+      m_vki->getLoaderProc(),
+      m_vki->instance(),
+      &m_surface);
+
     if (status != VK_SUCCESS)
       return status;
-    
+
     VkBool32 supportStatus = VK_FALSE;
 
     if ((status = m_vki->vkGetPhysicalDeviceSurfaceSupportKHR(m_device.adapter,
         m_device.queueFamily, m_surface, &supportStatus)) != VK_SUCCESS)
       return status;
-    
+
     if (!supportStatus) {
       m_vki->vkDestroySurfaceKHR(m_vki->instance(), m_surface, nullptr);
       return VK_ERROR_OUT_OF_HOST_MEMORY; // just abuse this
@@ -479,7 +469,7 @@ namespace dxvk::vk {
   void Presenter::destroySwapchain() {
     for (const auto& img : m_images)
       m_vkd->vkDestroyImageView(m_vkd->device(), img.view, nullptr);
-    
+
     for (const auto& sem : m_semaphores) {
       m_vkd->vkDestroySemaphore(m_vkd->device(), sem.acquire, nullptr);
       m_vkd->vkDestroySemaphore(m_vkd->device(), sem.present, nullptr);
@@ -496,6 +486,8 @@ namespace dxvk::vk {
 
   void Presenter::destroySurface() {
     m_vki->vkDestroySurfaceKHR(m_vki->instance(), m_surface, nullptr);
+
+    m_surface = VK_NULL_HANDLE;
   }
 
 }

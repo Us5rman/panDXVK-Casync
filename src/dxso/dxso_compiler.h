@@ -106,6 +106,8 @@ namespace dxvk {
     uint32_t typeId = 0;
 
     uint32_t imageTypeId = 0;
+
+    uint32_t boundConst = 0;
   };
 
   enum DxsoSamplerType : uint32_t {
@@ -267,7 +269,7 @@ namespace dxvk {
 
     DxsoShaderMetaInfo         m_meta;
     DxsoDefinedConstants       m_constants;
-    uint32_t                   m_maxDefinedConstant;
+    uint32_t                   m_maxDefinedConstant = 0u;
 
     SpirvModule                m_module;
 
@@ -282,9 +284,7 @@ namespace dxvk {
     ////////////////////////////////////////////////
     // Temporary r# vector registers with immediate
     // indexing, and x# vector array registers.
-    std::array<
-      DxsoRegisterPointer,
-      DxsoMaxTempRegs> m_rRegs;
+    std::vector<DxsoRegisterPointer> m_rRegs;
 
     ////////////////////////////////////////////////
     // Predicate registers
@@ -629,6 +629,12 @@ namespace dxvk {
 
       return this->emitRegisterLoad(lookup, writeMask);
     }
+
+    std::array<uint32_t, 2> emitBem(
+      const DxsoInstructionContext& ctx,
+      const DxsoRegisterValue& src0,
+      const DxsoRegisterValue& src1
+    );
 
     Rc<DxvkShader> compileShader();
 

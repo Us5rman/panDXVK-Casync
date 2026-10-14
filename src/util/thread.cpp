@@ -3,13 +3,28 @@
 
 #include <atomic>
 
-#ifndef _WIN32
+#ifdef _WIN32
 
 namespace dxvk::this_thread {
-  
+
+  bool isInModuleDetachment() {
+    using PFN_RtlDllShutdownInProgress = BOOLEAN (WINAPI *)();
+
+    static auto RtlDllShutdownInProgress = reinterpret_cast<PFN_RtlDllShutdownInProgress>(
+      ::GetProcAddress(::GetModuleHandleW(L"ntdll.dll"), "RtlDllShutdownInProgress"));
+
+    return RtlDllShutdownInProgress();
+  }
+
+}
+
+#else
+
+namespace dxvk::this_thread {
+
   static std::atomic<uint32_t> g_threadCtr = { 0u };
   static thread_local uint32_t g_threadId  = 0u;
-  
+
   // This implementation returns thread ids unique to the current instance.
   // ie. if you use this across multiple .so's then you might get conflicting ids.
   //

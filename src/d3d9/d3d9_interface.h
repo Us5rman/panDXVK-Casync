@@ -1,6 +1,7 @@
 #pragma once
 
 #include "d3d9_adapter.h"
+#include "d3d9_bridge.h"
 
 #include "../dxvk/dxvk_instance.h"
 
@@ -117,7 +118,7 @@ namespace dxvk {
 
     HRESULT STDMETHODCALLTYPE GetAdapterLUID(UINT Adapter, LUID* pLUID);
 
-    const D3D9Options& GetOptions() { return m_d3d9Options; }
+    const D3D9Options& GetOptions() const { return m_d3d9Options; }
 
     D3D9Adapter* GetAdapter(UINT Ordinal) {
       return Ordinal < m_adapters.size()
@@ -125,7 +126,55 @@ namespace dxvk {
         : nullptr;
     }
 
-    bool IsExtended() { return m_extended; }
+    D3DCompatibilityFlags GetD3DCompatibilityFlags() const {
+      return m_d3dCompatibility;
+    }
+
+    bool IsD3DCompatibile(D3DCompatibility d3dCompatibility) const {
+      return m_d3dCompatibility.test(d3dCompatibility);
+    }
+
+    void SetD3DCompatibility(D3DCompatibility d3dCompatibility) {
+      m_d3dCompatibility.set(d3dCompatibility);
+
+      switch (d3dCompatibility) {
+        case D3DCompatibility::D3D8:
+          Logger::info("The D3D9 interface is now operating in D3D8 compatibility mode.");
+          break;
+        case D3DCompatibility::D3D7:
+          m_d3dCompatibility.set(D3DCompatibility::D3D8);
+          m_d3dCompatibility.clr(D3DCompatibility::D3D6);
+          m_d3dCompatibility.clr(D3DCompatibility::D3D5);
+          m_d3dCompatibility.clr(D3DCompatibility::D3D3);
+          Logger::info("The D3D9 interface is now operating in D3D7 compatibility mode.");
+          break;
+        case D3DCompatibility::D3D6:
+          m_d3dCompatibility.set(D3DCompatibility::D3D8);
+          m_d3dCompatibility.set(D3DCompatibility::D3D7);
+          m_d3dCompatibility.clr(D3DCompatibility::D3D5);
+          m_d3dCompatibility.clr(D3DCompatibility::D3D3);
+          Logger::info("The D3D9 interface is now operating in D3D6 compatibility mode.");
+          break;
+        case D3DCompatibility::D3D5:
+          m_d3dCompatibility.set(D3DCompatibility::D3D8);
+          m_d3dCompatibility.set(D3DCompatibility::D3D7);
+          m_d3dCompatibility.set(D3DCompatibility::D3D6);
+          m_d3dCompatibility.clr(D3DCompatibility::D3D3);
+          Logger::info("The D3D9 interface is now operating in D3D5 compatibility mode.");
+          break;
+        case D3DCompatibility::D3D3:
+          m_d3dCompatibility.set(D3DCompatibility::D3D8);
+          m_d3dCompatibility.set(D3DCompatibility::D3D7);
+          m_d3dCompatibility.set(D3DCompatibility::D3D6);
+          m_d3dCompatibility.set(D3DCompatibility::D3D5);
+          Logger::info("The D3D9 interface is now operating in D3D3 compatibility mode.");
+          break;
+        default:
+          break;
+      }
+
+      RefreshAdapterFormatTables();
+    }
 
     Rc<DxvkInstance> GetInstance() { return m_instance; }
 
@@ -135,9 +184,15 @@ namespace dxvk {
 
     static const char* GetDriverDllName(DxvkGpuVendor vendor);
 
+    inline void RefreshAdapterFormatTables() {
+      for (auto& adapter : m_adapters)
+        adapter.RefreshFormatsTable();
+    }
+
     Rc<DxvkInstance>              m_instance;
 
-    bool                          m_extended;
+    DxvkLegacyD3DInterfaceBridge  m_legacyD3DBridge;
+    D3DCompatibilityFlags         m_d3dCompatibility;
 
     D3D9Options                   m_d3d9Options;
 

@@ -4,27 +4,30 @@ on: [push, pull_request, workflow_dispatch]
 
 jobs:
   build-set-windows:
-    runs-on: windows-2022
+    runs-on: windows-latest
 
     steps:
     - name: Checkout code
       id: checkout-code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v6
       with:
         submodules: recursive
+        fetch-depth: 0
 
     - name: Setup glslangValidator
+      id: setup-glslang
       shell: pwsh
       run: |
-        choco install vulkan-sdk -y
-        Write-Output "$([System.Environment]::GetEnvironmentVariable('VULKAN_SDK', 'Machine'))\Bin" `
-          | Out-File -FilePath "${Env:GITHUB_PATH}" -Append
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/HansKristian-Work/vkd3d-proton-ci/main/glslangValidator.exe" -OutFile "glslangValidator.exe"
+        Write-Output "$pwd" | Out-File -FilePath "${Env:GITHUB_PATH}" -Append
 
     - name: Setup Meson
+      id: setup-meson
       shell: pwsh
       run: pip install meson
 
     - name: Find Visual Studio
+      id: find-vs
       shell: pwsh
       run: |
         $installationPath = Get-VSSetupInstance `
@@ -33,7 +36,21 @@ jobs:
         Write-Output "VSDEVCMD=${installationPath}\Common7\Tools\VsDevCmd.bat" `
           | Out-File -FilePath "${Env:GITHUB_ENV}" -Append
 
+    - name: Download D3D8 SDK Headers
+      id: download-d3d8-headers
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -URI https://raw.githubusercontent.com/NovaRain/DXSDK_Collection/master/DXSDK_Aug2007/Include/d3d8.h -OutFile include/d3d8.h
+        Invoke-WebRequest -URI https://raw.githubusercontent.com/NovaRain/DXSDK_Collection/master/DXSDK_Aug2007/Include/d3d8types.h -OutFile include/d3d8types.h
+        Invoke-WebRequest -URI https://raw.githubusercontent.com/NovaRain/DXSDK_Collection/master/DXSDK_Aug2007/Include/d3d8caps.h -OutFile include/d3d8caps.h
+
+    - name: Get version
+      id: get-version
+      shell: bash
+      run: echo "VERSION_NAME=${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::8}" >> $GITHUB_ENV
+
     - name: Build MSVC x86
+      id: build-msvc-x86
       shell: pwsh
       run: |
         & "${Env:COMSPEC}" /s /c "`"${Env:VSDEVCMD}`" -arch=x86 -host_arch=x64 -no_logo && set" `
@@ -43,6 +60,7 @@ jobs:
         msbuild -m build-msvc-x86/dxvk.sln
 
     - name: Build MSVC x64
+      id: build-msvc-x64
       shell: pwsh
       run: |
         & "${Env:COMSPEC}" /s /c "`"${Env:VSDEVCMD}`" -arch=x64 -host_arch=x64 -no_logo && set" `
@@ -50,3 +68,41 @@ jobs:
           | % { [System.Environment]::SetEnvironmentVariable($_[0], $_[1]) }
         meson --buildtype release --backend vs2022 build-msvc-x64
         msbuild -m build-msvc-x64/dxvk.sln
+
+    - name: Prepare artifacts
+      id: prepare-artifacts
+      shell: pwsh
+      run: |
+        mkdir artifacts\x32
+        ls -Path build-msvc-x86\src -Include *.dll,*.pdb -Recurse
+          | cp -Destination (Join-Path -Path (pwd) -ChildPath artifacts\x32)
+        mkdir artifacts\x64
+        ls -Path build-msvc-x64\src -Include *.dll,*.pdb -Recurse
+          | cp -Destination (Join-Path -Path (pwd) -ChildPath artifacts\x64)
+
+    - name: Upload artifacts
+      id: upload-artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: dxvk-sarek-${{ env.VERSION_NAME }}-msvc-output
+        path: artifacts\*
+        if-no-files-found: error
+
+  check-version:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      id: checkout-code
+      uses: actions/checkout@v6
+
+    - name: Check version sync
+      id: check-version
+      shell: bash
+      run: |
+        release=$(cat RELEASE)
+        header=$(sed -n 's/^#define DXVK_VERSION "v\(.*\)"/\1/p' version.h.in)
+        build=$(sed -n "s/.*version *: *'v\([^']*\)'.*/\1/p" meson.build | head -n1)
+        echo "release=${release} header=${header} meson=${build}"
+        test "${release}" = "${header}"
+        test "${release}" = "${build}"

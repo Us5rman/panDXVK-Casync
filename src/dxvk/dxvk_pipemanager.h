@@ -11,11 +11,17 @@
 
 namespace dxvk {
 
+  // Forward declared rather than included: the compiler headers pull in
+  // dxvk_graphics.h and dxvk_include.h, which reach back here through
+  // dxvk_objects.h. Rc members only need a declaration, and every use of
+  // these types is in a translation unit that includes their header.
+  class DxvkPipelineCompiler;
   class DxvkStateCache;
+
 
   /**
    * \brief Pipeline count
-   * 
+   *
    * Stores number of graphics and
    * compute pipelines, individually.
    */
@@ -50,7 +56,7 @@ namespace dxvk {
   
   /**
    * \brief Pipeline manager
-   * 
+   *
    * Creates and stores graphics pipelines and compute
    * pipelines for each combination of shaders that is
    * used within the application. This is necessary
@@ -61,16 +67,15 @@ namespace dxvk {
     friend class DxvkComputePipeline;
     friend class DxvkGraphicsPipeline;
   public:
-    
+
     DxvkPipelineManager(
             DxvkDevice*         device,
             DxvkRenderPassPool* passManager);
-    
     ~DxvkPipelineManager();
-    
+
     /**
      * \brief Retrieves a compute pipeline object
-     * 
+     *
      * If a pipeline for the given shader stage object
      * already exists, it will be returned. Otherwise,
      * a new pipeline will be created.
@@ -79,10 +84,10 @@ namespace dxvk {
      */
     DxvkComputePipeline* createComputePipeline(
       const DxvkComputePipelineShaders& shaders);
-    
+
     /**
      * \brief Retrieves a graphics pipeline object
-     * 
+     *
      * If a pipeline for the given shader stage objects
      * already exists, it will be returned. Otherwise,
      * a new pipeline will be created.
@@ -91,18 +96,18 @@ namespace dxvk {
      */
     DxvkGraphicsPipeline* createGraphicsPipeline(
       const DxvkGraphicsPipelineShaders& shaders);
-    
+
     /*
      * \brief Registers a shader
-     * 
+     *
      * Starts compiling pipelines asynchronously
      * in case the state cache contains state
      * vectors for this shader.
      * \param [in] shader Newly compiled shader
      */
     void registerShader(
-      const Rc<DxvkShader>&         shader);
-    
+      const Rc<DxvkShader>& shader);
+
     /**
      * \brief Retrieves total pipeline count
      * \returns Number of compute/graphics pipelines
@@ -110,19 +115,20 @@ namespace dxvk {
     DxvkPipelineCount getPipelineCount() const;
 
     /**
-     * \brief Checks whether async compiler is busy
+     * \brief Checks whether the compiler is busy
      * \returns \c true if shaders are being compiled
      */
     bool isCompilingShaders() const;
 
     /**
-     * \brief Stops async compiler threads
+     * \brief Stops background compiler threads
      */
     void stopWorkerThreads() const;
-    
+
+
   private:
-    
-    DxvkDevice*               m_device;
+
+    DxvkDevice*               m_device = nullptr;
     Rc<DxvkPipelineCache>     m_cache;
     Rc<DxvkStateCache>        m_stateCache;
 
@@ -137,12 +143,12 @@ namespace dxvk {
     DxvkGplStats              m_gplStats;
     
     dxvk::mutex m_mutex;
-    
+
     std::unordered_map<
       DxvkComputePipelineShaders,
       DxvkComputePipeline,
       DxvkHash, DxvkEq> m_computePipelines;
-    
+
     std::unordered_map<
       DxvkGraphicsPipelineShaders,
       DxvkGraphicsPipeline,

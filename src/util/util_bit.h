@@ -1,23 +1,34 @@
 #pragma once
 
-#include <cstdint>
+#if (defined(__x86_64__) && !defined(__arm64ec__)) || (defined(_M_X64) && !defined(_M_ARM64EC)) \
+    || defined(__i386__) || defined(_M_IX86)
+  #define DXVK_ARCH_X86
+  #if defined(__x86_64__) || defined(_M_X64)
+    #define DXVK_ARCH_X86_64
+  #endif
+#elif defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
+  #define DXVK_ARCH_ARM64
+#endif
 
-#ifndef _MSC_VER
-#if defined(__WINE__) && defined(__clang__)
-#pragma push_macro("_WIN32")
-#undef _WIN32
-#endif
-#include <x86intrin.h>
-#if defined(__WINE__) && defined(__clang__)
-#pragma pop_macro("_WIN32")
-#endif
-#else
-#include <intrin.h>
+#ifdef DXVK_ARCH_X86
+  #ifndef _MSC_VER
+    #if defined(__WINE__) && defined(__clang__)
+      #pragma push_macro("_WIN32")
+      #undef _WIN32
+    #endif
+    #include <x86intrin.h>
+    #if defined(__WINE__) && defined(__clang__)
+      #pragma pop_macro("_WIN32")
+    #endif
+  #else
+    #include <intrin.h>
+  #endif
 #endif
 
 #include "util_likely.h"
 #include "util_math.h"
 
+#include <cstdint>
 #include <cstring>
 #include <iterator>
 #include <type_traits>
@@ -33,7 +44,7 @@ namespace dxvk::bit {
     std::memcpy(&dst, &src, sizeof(T));
     return dst;
   }
-  
+
   template<typename T>
   T extract(T value, uint32_t fst, uint32_t lst) {
     return (value >> fst) & ~(~T(0) << (lst - fst + 1));
@@ -42,7 +53,7 @@ namespace dxvk::bit {
   inline uint32_t popcntStep(uint32_t n, uint32_t mask, uint32_t shift) {
     return (n & mask) + ((n & ~mask) >> shift);
   }
-  
+
   inline uint32_t popcnt(uint32_t n) {
     n = popcntStep(n, 0x55555555, 1);
     n = popcntStep(n, 0x33333333, 2);
@@ -51,13 +62,13 @@ namespace dxvk::bit {
     n = popcntStep(n, 0x0000FFFF, 16);
     return n;
   }
-  
+
   inline uint32_t tzcnt(uint32_t n) {
     #if defined(_MSC_VER) && !defined(__clang__)
     return _tzcnt_u32(n);
     #elif defined(__BMI__)
     return __tzcnt_u32(n);
-    #elif defined(__GNUC__) || defined(__clang__)
+    #elif defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__))
     uint32_t res;
     uint32_t tmp;
     asm (
@@ -67,6 +78,8 @@ namespace dxvk::bit {
       : "=&r" (res), "=&r" (tmp)
       : "r" (n));
     return res;
+    #elif defined(__GNUC__) || defined(__clang__)
+    return n != 0 ? __builtin_ctz(n) : 32;
     #else
     uint32_t r = 31;
     n &= -n;
@@ -76,6 +89,38 @@ namespace dxvk::bit {
     r -= (n & 0x33333333) ?  2 : 0;
     r -= (n & 0x55555555) ?  1 : 0;
     return n != 0 ? r : 32;
+    #endif
+  }
+
+  inline uint32_t tzcnt(uint64_t n) {
+    #if defined(DXVK_ARCH_X86_64) && defined(_MSC_VER) && !defined(__clang__)
+    if (n == 0)
+      return 64;
+    return (uint32_t)_tzcnt_u64(n);
+    #elif defined(DXVK_ARCH_X86_64) && defined(__BMI__)
+    return __tzcnt_u64(n);
+    #elif defined(DXVK_ARCH_X86_64) && (defined(__GNUC__) || defined(__clang__))
+    uint64_t res;
+    uint64_t tmp;
+    asm (
+      "tzcnt %2, %0;"
+      "mov  $64, %1;"
+      "test  %2, %2;"
+      "cmovz %1, %0;"
+      : "=&r" (res), "=&r" (tmp)
+      : "r" (n)
+      : "cc");
+    return res;
+    #elif defined(__GNUC__) || defined(__clang__)
+    return n != 0 ? __builtin_ctzll(n) : 64;
+    #else
+    uint32_t lo = uint32_t(n);
+    if (lo) {
+      return tzcnt(lo);
+    } else {
+      uint32_t hi = uint32_t(n >> 32);
+      return tzcnt(hi) + 32;
+    }
     #endif
   }
 
@@ -146,7 +191,7 @@ namespace dxvk::bit {
   template<typename T>
   bool bcmpeq(const T* a, const T* b) {
     static_assert(alignof(T) >= 16);
-    #if defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER)
+    #if defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
     auto ai = reinterpret_cast<const __m128i*>(a);
     auto bi = reinterpret_cast<const __m128i*>(b);
 
@@ -334,7 +379,8 @@ namespace dxvk::bit {
 
     };
 
-    BitMask() { }
+    BitMask()
+      : m_mask(0) { }
 
     BitMask(uint32_t n)
       : m_mask(n) { }

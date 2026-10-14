@@ -5,10 +5,10 @@
 #include "dxvk_include.h"
 
 namespace dxvk {
-  
+
   class DxvkDevice;
   class DxvkInstance;
-  
+
   /**
    * \brief GPU vendors
    * Based on PCIe IDs.
@@ -22,7 +22,7 @@ namespace dxvk {
 
   /**
    * \brief Adapter memory heap info
-   * 
+   *
    * Stores info about a heap, and the amount
    * of memory allocated from it by the app.
    */
@@ -34,7 +34,7 @@ namespace dxvk {
 
   /**
    * \brief Adapter memory info
-   * 
+   *
    * Stores properties and allocation
    * info of each available heap.
    */
@@ -50,23 +50,23 @@ namespace dxvk {
     uint32_t graphics;
     uint32_t transfer;
   };
-  
+
   /**
    * \brief DXVK adapter
-   * 
+   *
    * Corresponds to a physical device in Vulkan. Provides
    * all kinds of information about the device itself and
    * the supported feature set.
    */
   class DxvkAdapter : public RcObject {
-    
+
   public:
-    
+
     DxvkAdapter(
       const Rc<vk::InstanceFn>& vki,
             VkPhysicalDevice    handle);
     ~DxvkAdapter();
-    
+
     /**
      * \brief Vulkan instance functions
      * \returns Vulkan instance functions
@@ -74,7 +74,7 @@ namespace dxvk {
     Rc<vk::InstanceFn> vki() const {
       return m_vki;
     }
-    
+
     /**
      * \brief Physical device handle
      * \returns The adapter handle
@@ -82,10 +82,10 @@ namespace dxvk {
     VkPhysicalDevice handle() const {
       return m_handle;
     }
-    
+
     /**
      * \brief Physical device properties
-     * 
+     *
      * Returns a read-only reference to the core
      * properties of the Vulkan physical device.
      * \returns Physical device core properties
@@ -96,7 +96,7 @@ namespace dxvk {
 
     /**
      * \brief Device info
-     * 
+     *
      * Returns a read-only reference to the full
      * device info structure, including extended
      * properties.
@@ -105,10 +105,10 @@ namespace dxvk {
     const DxvkDeviceInfo& devicePropertiesExt() const {
       return m_deviceInfo;
     }
-    
+
     /**
      * \brief Supportred device features
-     * 
+     *
      * Queries the supported device features.
      * \returns Device features
      */
@@ -151,7 +151,7 @@ namespace dxvk {
 
     /**
      * \brief Retrieves memory heap info
-     * 
+     *
      * Returns properties of all available memory heaps,
      * both device-local and non-local heaps, and the
      * amount of memory allocated from those heaps by
@@ -159,10 +159,10 @@ namespace dxvk {
      * \returns Memory heap info
      */
     DxvkAdapterMemoryInfo getMemoryHeapInfo() const;
-    
+
     /**
      * \brief Memory properties
-     * 
+     *
      * Queries the memory types and memory heaps of
      * the device. This is useful for memory allocators.
      * \returns Device memory properties
@@ -171,16 +171,16 @@ namespace dxvk {
 
     /**
      * \brief Queries format support
-     * 
+     *
      * \param [in] format The format to query
      * \returns Format support info
      */
     VkFormatProperties formatProperties(
       VkFormat format) const;
-    
+
     /**
      * \brief Queries image format support
-     * 
+     *
      * \param [in] format Format to query
      * \param [in] type Image type
      * \param [in] tiling Image tiling
@@ -196,22 +196,22 @@ namespace dxvk {
       VkImageUsageFlags         usage,
       VkImageCreateFlags        flags,
       VkImageFormatProperties&  properties) const;
-    
+
     /**
      * \brief Retrieves queue family indices
      * \returns Indices for all queue families
      */
     DxvkAdapterQueueIndices findQueueFamilies() const;
-    
+
     /**
      * \brief Tests whether all required features are supported
-     * 
+     *
      * \param [in] features Required device features
      * \returns \c true if all features are supported
      */
     bool checkFeatureSupport(
       const DxvkDeviceFeatures& required) const;
-    
+
     /**
      * \brief Enables extensions for this adapter
      *
@@ -222,10 +222,10 @@ namespace dxvk {
      */
     void enableExtensions(
       const DxvkNameSet&        extensions);
-    
+
     /**
      * \brief Creates a DXVK device
-     * 
+     *
      * Creates a logical device for this adapter.
      * \param [in] instance Parent instance
      * \param [in] enabledFeatures Device features
@@ -234,10 +234,10 @@ namespace dxvk {
     Rc<DxvkDevice> createDevice(
       const Rc<DxvkInstance>&   instance,
             DxvkDeviceFeatures  enabledFeatures);
-    
+
     /**
      * \brief Registers memory allocation
-     * 
+     *
      * Updates memory alloc info accordingly.
      * \param [in] heap Memory heap index
      * \param [in] bytes Allocation size
@@ -245,10 +245,10 @@ namespace dxvk {
     void notifyHeapMemoryAlloc(
             uint32_t            heap,
             VkDeviceSize        bytes);
-    
+
     /**
      * \brief Registers memory deallocation
-     * 
+     *
      * Updates memory alloc info accordingly.
      * \param [in] heap Memory heap index
      * \param [in] bytes Allocation size
@@ -256,7 +256,7 @@ namespace dxvk {
     void notifyHeapMemoryFree(
             uint32_t            heap,
             VkDeviceSize        bytes);
-    
+
     /**
      * \brief Tests if the driver matches certain criteria
      *
@@ -272,15 +272,36 @@ namespace dxvk {
             VkDriverIdKHR       driver,
             uint32_t            minVer,
             uint32_t            maxVer) const;
-    
+
+    /**
+     * \brief Tests whether the driver matches a given driver ID
+     *
+     * \param [in] driver Driver ID to match against
+     * \returns \c true if the driver ID matches
+     */
+    bool matchesDriver(
+            VkDriverIdKHR       driver) const;
+
+    /**
+     * \brief Checks for feature support gaps
+     *
+     * Tests whether any feature the renderer relies on for correct
+     * output is missing. When this is true, rendering may be visibly
+     * wrong through no fault of the client API code.
+     * \param [in] features Enabled device features
+     * \returns \c true if any such feature is unsupported
+     */
+    static bool hasDegradedFeatures(
+      const DxvkDeviceFeatures& features);
+
     /**
      * \brief Logs DXVK adapter info
-     * 
+     *
      * May be useful for bug reports
      * and general troubleshooting.
      */
     void logAdapterInfo() const;
-    
+
     /**
      * \brief Checks whether this is a UMA system
      *
@@ -289,9 +310,9 @@ namespace dxvk {
      * \returns \c true if the system has unified memory.
      */
     bool isUnifiedMemoryArchitecture() const;
-    
+
   private:
-    
+
     Rc<vk::InstanceFn>  m_vki;
     VkPhysicalDevice    m_handle;
 
@@ -301,7 +322,7 @@ namespace dxvk {
     DxvkDeviceFeatures  m_deviceFeatures;
 
     bool                m_hasMemoryBudget;
-    
+
     std::vector<VkQueueFamilyProperties> m_queueFamilies;
 
     std::array<std::atomic<VkDeviceSize>, VK_MAX_MEMORY_HEAPS> m_heapAlloc;
@@ -315,11 +336,12 @@ namespace dxvk {
     uint32_t findQueueFamily(
             VkQueueFlags          mask,
             VkQueueFlags          flags) const;
-    
+
     static void logNameList(const DxvkNameList& names);
     static void logFeatures(const DxvkDeviceFeatures& features);
+    static void logDegradation(const DxvkDeviceFeatures& features);
     static void logQueueFamilies(const DxvkAdapterQueueIndices& queues);
-    
+
   };
-  
+
 }

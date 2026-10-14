@@ -43,6 +43,17 @@ namespace dxvk {
     enableAsync    = getFlag("PANDXVK_ASYNC",     config.getOption<bool>("dxvk.enableAsync",    false));
     enableDyAsync  = getFlag("PANDXVK_DYASYNC",   config.getOption<bool>("dxvk.enableDyAsync",  false));
     enableAsyncLog = getFlag("PANDXVK_ASYNC_LOG", config.getOption<bool>("dxvk.asyncLog",       false));
+    hideIntegratedGraphics = config.getOption<bool>   ("dxvk.hideIntegratedGraphics", false);
+    deviceFilter          = config.getOption<std::string>("dxvk.deviceFilter",        "");
+    tilerMode             = config.getOption<Tristate>("dxvk.tilerMode",              Tristate::Auto);
+    zeroMappedMemory      = config.getOption<bool>("dxvk.zeroMappedMemory", false);
+    lowerSinCos           = config.getOption<Tristate>("dxvk.lowerSinCos",            Tristate::Auto);
+    auto budget = config.getOption<int32_t>("dxvk.maxMemoryBudget", 0);
+    maxMemoryBudget = VkDeviceSize(std::max(budget, 0)) << 20u;
+    shaderCompilationMethod = config.getOption<std::string>("dxvk.shaderCompilationMethod", "dyasync");
+    framePace        = config.getOption<std::string>("dxvk.framePace", "");
+    lowLatencyOffset  = config.getOption<int32_t>     ("dxvk.lowLatencyOffset", 0);
+    numShaderCompilerThreads = config.getOption<int32_t>("dxvk.numShaderCompilerThreads", 0);
   }
 
 }

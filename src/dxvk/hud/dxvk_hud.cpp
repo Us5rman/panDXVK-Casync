@@ -1,18 +1,24 @@
 #include <cstring>
+#include <algorithm>
 
 #include "dxvk_hud.h"
 
 namespace dxvk::hud {
-  
+
   Hud::Hud(
     const Rc<DxvkDevice>& device)
   : m_device        (device),
     m_renderer      (device),
     m_hudItems      (device),
-    m_scale         (m_hudItems.getOption<float>("scale", 1.0f)) {
+    m_scale         (m_hudItems.getOption<float>("scale", 1.0f)),
+    m_opacity       (m_hudItems.getOption<float>("opacity", 1.0f)) {
     // Sanitize scaling factor
     if (m_scale < 0.01f)
       m_scale = 1.0f;
+
+    // Sanitize HUD opacity factor
+    if (m_opacity != 1.0f)
+      m_opacity = std::max(std::min(m_opacity, 1.0f), 0.1f);
 
     // Set up constant state
     m_rsState.polygonMode       = VK_POLYGON_MODE_FILL;
@@ -47,18 +53,18 @@ namespace dxvk::hud {
     addItem<HudGpuLoadItem>("gpuload", -1, device);
     addItem<HudCompilerActivityItem>("compiler", -1, device);
   }
-  
-  
+
+
   Hud::~Hud() {
-    
+
   }
-  
-  
+
+
   void Hud::update() {
     m_hudItems.update();
   }
-  
-  
+
+
   void Hud::render(
     const Rc<DxvkContext>&  ctx,
           VkSurfaceFormatKHR surfaceFormat,
@@ -67,8 +73,8 @@ namespace dxvk::hud {
     this->renderHudElements(ctx);
     this->resetRendererState(ctx);
   }
-  
-  
+
+
   Rc<Hud> Hud::createHud(const Rc<DxvkDevice>& device) {
     return new Hud(device);
   }
@@ -97,7 +103,7 @@ namespace dxvk::hud {
     ctx->setBlendMode(0, m_blendMode);
 
     ctx->setSpecConstant(VK_PIPELINE_BIND_POINT_GRAPHICS, 0, isSrgb);
-    m_renderer.beginFrame(ctx, surfaceSize, m_scale);
+    m_renderer.beginFrame(ctx, surfaceSize, m_scale, m_opacity);
   }
 
 
@@ -109,5 +115,5 @@ namespace dxvk::hud {
   void Hud::renderHudElements(const Rc<DxvkContext>& ctx) {
     m_hudItems.render(m_renderer);
   }
-  
+
 }

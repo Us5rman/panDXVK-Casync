@@ -25,12 +25,25 @@ namespace dxvk {
     }
     
     ULONG STDMETHODCALLTYPE Release() {
-      uint32_t refCount = --this->m_refCount;
+      uint32_t oldRefCount, refCount;
+
+      do {
+        oldRefCount = this->m_refCount.load();
+
+        // clamp value to 0 to prevent underruns
+        if (unlikely(!oldRefCount))
+          return 0;
+
+        refCount = oldRefCount - 1;
+
+      } while (!this->m_refCount.compare_exchange_weak(oldRefCount, refCount));
+
       if (unlikely(!refCount)) {
         auto* pDevice = GetDevice();
         this->ReleasePrivate();
         pDevice->Release();
       }
+
       return refCount;
     }
 
