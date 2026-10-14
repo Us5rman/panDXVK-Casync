@@ -291,6 +291,9 @@ namespace dxvk {
     static constexpr uint32_t QueuedSetSize = 4096;
     static constexpr uint32_t QueuedSetMask = QueuedSetSize - 1;
 
+    // List of pipeline instances, shared between threads
+    alignas(CACHE_LINE_SIZE)
+    dxvk::mutex                               m_mutex;
     sync::List<DxvkGraphicsPipelineInstance>  m_pipelines;
 
     // Pipeline libraries, only accessed while m_mutex is held
