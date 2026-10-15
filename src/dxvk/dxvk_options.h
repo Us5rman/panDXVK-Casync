@@ -43,10 +43,6 @@ namespace dxvk {
     /// Memory budget in bytes
     VkDeviceSize maxMemoryBudget = 0u;
 
-    // Number of compiler threads used by the
-    // active shader compilation method
-    int32_t numShaderCompilerThreads;
-
     /// Frame pacing mode. Supported values: "", "low-latency", "min-latency".
     /// Empty (default) preserves Sarek existing behaviour unchanged.
     std::string framePace;

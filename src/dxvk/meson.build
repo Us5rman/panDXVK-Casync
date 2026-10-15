@@ -61,7 +61,6 @@ dxvk_shaders = files([
 dxvk_src = [
   'dxvk_adapter.cpp',
   'dxvk_allocator.cpp',
-  'dxvk_asynccompiler.cpp',
   'dxvk_barrier.cpp',
   'dxvk_buffer.cpp',
   'dxvk_cmdlist.cpp',
@@ -101,7 +100,6 @@ dxvk_src = [
   'dxvk_pipecompiler.cpp',
   'dxvk_pipelayout.cpp',
   'dxvk_pipemanager.cpp',
-  'dxvk_pipecompiler.cpp',
   'dxvk_queue.cpp',
   'dxvk_renderpass.cpp',
   'dxvk_resource.cpp',

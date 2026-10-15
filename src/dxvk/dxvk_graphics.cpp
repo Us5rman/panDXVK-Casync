@@ -3,7 +3,6 @@
 
 #include "../util/util_time.h"
 
-#include "dxvk_asynccompiler.h"
 #include "dxvk_device.h"
 #include "dxvk_graphics.h"
 #include "dxvk_pipecompiler.h"

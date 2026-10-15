@@ -52,7 +52,6 @@ namespace dxvk {
     maxMemoryBudget = VkDeviceSize(std::max(budget, 0)) << 20u;
     framePace        = config.getOption<std::string>("dxvk.framePace", "");
     lowLatencyOffset  = config.getOption<int32_t>     ("dxvk.lowLatencyOffset", 0);
-    numShaderCompilerThreads = config.getOption<int32_t>("dxvk.numShaderCompilerThreads", 0);
   }
 
 }
