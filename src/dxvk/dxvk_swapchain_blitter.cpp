@@ -363,9 +363,6 @@ namespace dxvk {
      || srcRect.extent.width  != src.width || srcRect.extent.height != src.height)
       return "partial present rectangle";
 
-    if (dst.width == src.width && dst.height == src.height)
-      return "back buffer and output are the same size, nothing to upscale";
-
     if (dst.width < src.width || dst.height < src.height)
       return "output is smaller than the back buffer";
 
@@ -373,18 +370,13 @@ namespace dxvk {
   }
 
 
-  void DxvkSwapchainBlitter::presentFsr(
+ void DxvkSwapchainBlitter::presentFsr(
           DxvkContext*        ctx,
     const Rc<DxvkImageView>&  dstView,
     const Rc<DxvkImageView>&  srcView) {
     VkExtent3D dstExtent = dstView->imageInfo().extent;
     VkExtent3D srcExtent = srcView->imageInfo().extent;
     VkFormat   format    = dstView->info().format;
-
-    if (m_fsrImage == nullptr
-     || m_fsrImage->info().extent != dstExtent
-     || m_fsrImage->info().format != format)
-      this->createFsrImage(dstExtent, format);
 
     FsrArgs args;
     args.srcExtent = { srcExtent.width, srcExtent.height };
@@ -394,12 +386,23 @@ namespace dxvk {
     VkRect2D dstRect = { { 0, 0 }, { dstExtent.width, dstExtent.height } };
     VkRect2D srcRect = { { 0, 0 }, { srcExtent.width, srcExtent.height } };
 
+    if (srcExtent.width == dstExtent.width && srcExtent.height == dstExtent.height) {
+      this->draw(ctx, m_fsRcas, dstView, dstRect,
+        srcView, srcRect, m_samplerGamma, &args, sizeof(args));
+      return;
+    }
+
+    if (m_fsrImage == nullptr
+     || m_fsrImage->info().extent != dstExtent
+     || m_fsrImage->info().format != format)
+      this->createFsrImage(dstExtent, format);
+
     this->draw(ctx, m_fsEasu, m_fsrTargetView, dstRect,
       srcView, srcRect, m_samplerGamma, &args, sizeof(args));
 
     this->draw(ctx, m_fsRcas, dstView, dstRect,
       m_fsrSampleView, dstRect, m_samplerGamma, &args, sizeof(args));
-  }
+ }
 
 
   void DxvkSwapchainBlitter::logFsr(
@@ -419,7 +422,10 @@ namespace dxvk {
     m_fsrLogDst    = dst;
     m_fsrLogActive = active;
 
-    if (active) {
+    if (active && !(src != dst)) {
+      Logger::info(str::format("panDXVK: fsr: sharpening only at ",
+        dst.width, "x", dst.height, ", sharpness=", m_fsrSharpness));
+    } else if (active) {
       Logger::info(str::format("panDXVK: fsr: upscaling ",
         src.width, "x", src.height, " -> ", dst.width, "x", dst.height,
         ", sharpness=", m_fsrSharpness));
