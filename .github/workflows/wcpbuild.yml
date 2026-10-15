@@ -108,30 +108,44 @@ jobs:
           mv x32 syswow64
 
       - name: Package WCP
+        env:
+          VNAME: ${{ steps.version.outputs.version_name }}
+          VCODE: ${{ steps.version.outputs.version_code }}
+          VDESC: ${{ inputs.release_description }}
         run: |
           cd ./workdir
-          cat > profile.json << 'JSONEOF'
-          {
-            "type": "DXVK",
-            "versionName": "pandxvk-${{ steps.version.outputs.version_name }}",
-            "versionCode": ${{ steps.version.outputs.version_code }},
-            "description": "${{ inputs.release_description }}",
-            "files": [
-              {"source": "system32/d3d9.dll",      "target": "${system32}/d3d9.dll"},
-              {"source": "system32/d3d10.dll",     "target": "${system32}/d3d10.dll"},
-              {"source": "system32/d3d10_1.dll",   "target": "${system32}/d3d10_1.dll"},
-              {"source": "system32/d3d10core.dll", "target": "${system32}/d3d10core.dll"},
-              {"source": "system32/d3d11.dll",     "target": "${system32}/d3d11.dll"},
-              {"source": "system32/dxgi.dll",      "target": "${system32}/dxgi.dll"},
-              {"source": "syswow64/d3d9.dll",      "target": "${syswow64}/d3d9.dll"},
-              {"source": "syswow64/d3d10.dll",     "target": "${syswow64}/d3d10.dll"},
-              {"source": "syswow64/d3d10_1.dll",   "target": "${syswow64}/d3d10_1.dll"},
-              {"source": "syswow64/d3d10core.dll", "target": "${syswow64}/d3d10core.dll"},
-              {"source": "syswow64/d3d11.dll",     "target": "${syswow64}/d3d11.dll"},
-              {"source": "syswow64/dxgi.dll",      "target": "${syswow64}/dxgi.dll"}
-            ]
+          python3 - << 'PYEOF'
+          import glob, json, os, sys
+
+          # The manifest is derived from what the build actually shipped.
+          # It was previously hardcoded, and it drifted: it listed d3d10.dll and
+          # d3d10_1.dll (targets this tree never builds — src/d3d10/meson.build
+          # only declares d3d10core) while omitting d3d8.dll and ddraw.dll, which
+          # are shipped. Four phantom sources broke every import.
+          folders = (("system32", "${system32}"), ("syswow64", "${syswow64}"))
+          files = []
+          for folder, prefix in folders:
+              dlls = sorted(glob.glob(os.path.join(folder, "*.dll")))
+              if not dlls:
+                  sys.exit(f"ERROR: {folder}/ contains no DLLs — the build artifact did not land.")
+              for dll in dlls:
+                  name = os.path.basename(dll)
+                  files.append({"source": dll, "target": f"{prefix}/{name}"})
+              names = ", ".join(os.path.basename(d) for d in dlls)
+              print(f"{folder}: {len(dlls)} DLLs -> {names}")
+
+          profile = {
+              "type": "DXVK",
+              "versionName": f"pandxvk-{os.environ['VNAME']}",
+              "versionCode": int(os.environ["VCODE"]),
+              "description": os.environ["VDESC"],
+              "files": files,
           }
-          JSONEOF
+          with open("profile.json", "w", encoding="utf-8") as fh:
+              json.dump(profile, fh, indent=2)
+              fh.write("\n")
+          print(f"profile.json generated from archive contents: {len(files)} entries")
+          PYEOF
           tar --zstd -cf "../pandxvk-${{ steps.version.outputs.version_name }}.wcp" \
             system32/ syswow64/ profile.json
 
