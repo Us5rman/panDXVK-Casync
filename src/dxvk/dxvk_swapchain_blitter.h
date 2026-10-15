@@ -69,12 +69,21 @@ namespace dxvk {
       };
     };
 
+    struct FsrArgs {
+      VkExtent2D srcExtent;
+      VkExtent2D dstExtent;
+      float      rcasStops;
+    };
+
     Rc<DxvkDevice>      m_device;
 
     Rc<DxvkShader>      m_fsCopy;
     Rc<DxvkShader>      m_fsBlit;
     Rc<DxvkShader>      m_fsResolve;
     Rc<DxvkShader>      m_vs;
+
+    Rc<DxvkShader>      m_fsEasu;
+    Rc<DxvkShader>      m_fsRcas;
 
     Rc<DxvkBuffer>      m_gammaBuffer;
     Rc<DxvkImage>       m_gammaImage;
@@ -86,8 +95,20 @@ namespace dxvk {
     Rc<DxvkImage>       m_resolveImage;
     Rc<DxvkImageView>   m_resolveView;
 
+    Rc<DxvkImage>       m_fsrImage;
+    Rc<DxvkImageView>   m_fsrTargetView;
+    Rc<DxvkImageView>   m_fsrSampleView;
+
     Rc<DxvkSampler>     m_samplerPresent;
     Rc<DxvkSampler>     m_samplerGamma;
+
+    bool                m_fsrEnabled   = false;
+    float               m_fsrSharpness = 0.8f;
+    float               m_fsrRcasStops = 0.4f;
+
+    VkExtent3D          m_fsrLogSrc    = { 0, 0, 0 };
+    VkExtent3D          m_fsrLogDst    = { 0, 0, 0 };
+    bool                m_fsrLogActive = false;
 
     void draw(
             DxvkContext*        ctx,
@@ -95,7 +116,10 @@ namespace dxvk {
       const Rc<DxvkImageView>&  dstView,
             VkRect2D            dstRect,
       const Rc<DxvkImageView>&  srcView,
-            VkRect2D            srcRect);
+            VkRect2D            srcRect,
+      const Rc<DxvkSampler>&    sampler  = nullptr,
+      const void*               pushData = nullptr,
+            uint32_t            pushSize = 0);
 
     void resolve(
             DxvkContext*        ctx,
@@ -103,6 +127,24 @@ namespace dxvk {
       const Rc<DxvkImageView>&  srcView);
 
     void updateGammaTexture(DxvkContext* ctx);
+
+    void readFsrConfig();
+
+    const char* fsrBlockReason(
+      const Rc<DxvkImageView>&  dstView,
+            VkRect2D            dstRect,
+      const Rc<DxvkImageView>&  srcView,
+            VkRect2D            srcRect) const;
+
+    void presentFsr(
+            DxvkContext*        ctx,
+      const Rc<DxvkImageView>&  dstView,
+      const Rc<DxvkImageView>&  srcView);
+
+    void logFsr(
+            VkExtent3D          src,
+            VkExtent3D          dst,
+            const char*         reason);
 
     void createSampler();
 
@@ -112,6 +154,10 @@ namespace dxvk {
       const DxvkImageCreateInfo&  info);
 
     void destroyResolveImage();
+
+    void createFsrImage(
+            VkExtent3D          extent,
+            VkFormat            format);
 
   };
   
