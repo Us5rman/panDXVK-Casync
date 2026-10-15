@@ -1,5 +1,13 @@
 #include "dxvk_swapchain_blitter.h"
 
+#include <algorithm>
+#include <cmath>
+#include <string>
+
+#include "../util/util_env.h"
+
+#include <dxvk_fsr_easu_frag.h>
+#include <dxvk_fsr_rcas_frag.h>
 #include <dxvk_present_frag.h>
 #include <dxvk_present_frag_blit.h>
 #include <dxvk_present_frag_ms.h>
@@ -10,6 +18,7 @@ namespace dxvk {
   
   DxvkSwapchainBlitter::DxvkSwapchainBlitter(const Rc<DxvkDevice>& device)
   : m_device(device) {
+    this->readFsrConfig();
     this->createSampler();
     this->createShaders();
   }
@@ -42,6 +51,18 @@ namespace dxvk {
       srcRect.extent = {
         srcView->imageInfo().extent.width,
         srcView->imageInfo().extent.height };
+    }
+
+    if (m_fsrEnabled) {
+      const char* reason = this->fsrBlockReason(dstView, dstRect, srcView, srcRect);
+
+      this->logFsr(srcView->imageInfo().extent, dstView->imageInfo().extent, reason);
+
+      if (!reason) {
+        this->presentFsr(ctx, dstView, srcView);
+        this->destroyResolveImage();
+        return;
+      }
     }
 
     bool sameSize = dstRect.extent == srcRect.extent;
@@ -108,7 +129,10 @@ namespace dxvk {
     const Rc<DxvkImageView>&  dstView,
           VkRect2D            dstRect,
     const Rc<DxvkImageView>&  srcView,
-          VkRect2D            srcRect) {
+          VkRect2D            srcRect,
+    const Rc<DxvkSampler>&    sampler,
+    const void*               pushData,
+          uint32_t            pushSize) {
     DxvkInputAssemblyState iaState;
     iaState.primitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
     iaState.primitiveRestart  = VK_FALSE;
@@ -191,7 +215,12 @@ namespace dxvk {
     else
       ctx->clearRenderTarget(dstView, VK_IMAGE_ASPECT_COLOR_BIT, VkClearValue());
 
-    ctx->bindResourceSampler(BindingIds::Image, m_samplerPresent);
+    Rc<DxvkSampler> imageSampler = m_samplerPresent;
+
+    if (sampler != nullptr)
+      imageSampler = sampler;
+
+    ctx->bindResourceSampler(BindingIds::Image, imageSampler);
     ctx->bindResourceSampler(BindingIds::Gamma, m_samplerGamma);
 
     ctx->bindResourceView(BindingIds::Image, srcView, nullptr);
@@ -200,15 +229,19 @@ namespace dxvk {
     ctx->bindShader(VK_SHADER_STAGE_VERTEX_BIT, m_vs);
     ctx->bindShader(VK_SHADER_STAGE_FRAGMENT_BIT, fs);
 
-    PresenterArgs args;
-    args.srcOffset = srcRect.offset;
+    if (pushData != nullptr) {
+      ctx->pushConstants(0, pushSize, pushData);
+    } else {
+      PresenterArgs args;
+      args.srcOffset = srcRect.offset;
 
-    if (dstRect.extent == srcRect.extent)
-      args.dstOffset = dstRect.offset;
-    else
-      args.srcExtent = srcRect.extent;
+      if (dstRect.extent == srcRect.extent)
+        args.dstOffset = dstRect.offset;
+      else
+        args.srcExtent = srcRect.extent;
 
-    ctx->pushConstants(0, sizeof(args), &args);
+      ctx->pushConstants(0, sizeof(args), &args);
+    }
 
     ctx->setSpecConstant(VK_PIPELINE_BIND_POINT_GRAPHICS, 0, srcView->imageInfo().sampleCount);
     ctx->draw(3, 1, 0, 0);
@@ -285,6 +318,118 @@ namespace dxvk {
   }
 
 
+  void DxvkSwapchainBlitter::readFsrConfig() {
+    m_fsrEnabled = env::getEnvVar("PANDXVK_FSR") == "1";
+
+    if (!m_fsrEnabled)
+      return;
+
+    std::string value = env::getEnvVar("PANDXVK_FSR_SHARPNESS");
+
+    if (!value.empty()) {
+      try {
+        m_fsrSharpness = std::stof(value);
+      } catch (const std::exception&) {
+        Logger::warn(str::format("panDXVK: fsr: invalid PANDXVK_FSR_SHARPNESS '", value, "', using ", m_fsrSharpness));
+      }
+    }
+
+    if (!std::isfinite(m_fsrSharpness))
+      m_fsrSharpness = 0.8f;
+
+    m_fsrSharpness = std::min(std::max(m_fsrSharpness, 0.0f), 1.0f);
+    m_fsrRcasStops = 2.0f * (1.0f - m_fsrSharpness);
+
+    Logger::info(str::format("panDXVK: fsr: enabled, sharpness=", m_fsrSharpness));
+  }
+
+
+  const char* DxvkSwapchainBlitter::fsrBlockReason(
+    const Rc<DxvkImageView>&  dstView,
+          VkRect2D            dstRect,
+    const Rc<DxvkImageView>&  srcView,
+          VkRect2D            srcRect) const {
+    VkExtent3D dst = dstView->imageInfo().extent;
+    VkExtent3D src = srcView->imageInfo().extent;
+
+    if (srcView->imageInfo().sampleCount != VK_SAMPLE_COUNT_1_BIT)
+      return "multisampled back buffer";
+
+    if (m_gammaCpCount)
+      return "gamma ramp active";
+
+    if (dstRect.offset.x || dstRect.offset.y || srcRect.offset.x || srcRect.offset.y
+     || dstRect.extent.width  != dst.width || dstRect.extent.height != dst.height
+     || srcRect.extent.width  != src.width || srcRect.extent.height != src.height)
+      return "partial present rectangle";
+
+    if (dst.width == src.width && dst.height == src.height)
+      return "back buffer and output are the same size, nothing to upscale";
+
+    if (dst.width < src.width || dst.height < src.height)
+      return "output is smaller than the back buffer";
+
+    return nullptr;
+  }
+
+
+  void DxvkSwapchainBlitter::presentFsr(
+          DxvkContext*        ctx,
+    const Rc<DxvkImageView>&  dstView,
+    const Rc<DxvkImageView>&  srcView) {
+    VkExtent3D dstExtent = dstView->imageInfo().extent;
+    VkExtent3D srcExtent = srcView->imageInfo().extent;
+    VkFormat   format    = dstView->info().format;
+
+    if (m_fsrImage == nullptr
+     || m_fsrImage->info().extent != dstExtent
+     || m_fsrImage->info().format != format)
+      this->createFsrImage(dstExtent, format);
+
+    FsrArgs args;
+    args.srcExtent = { srcExtent.width, srcExtent.height };
+    args.dstExtent = { dstExtent.width, dstExtent.height };
+    args.rcasStops = m_fsrRcasStops;
+
+    VkRect2D dstRect = { { 0, 0 }, { dstExtent.width, dstExtent.height } };
+    VkRect2D srcRect = { { 0, 0 }, { srcExtent.width, srcExtent.height } };
+
+    this->draw(ctx, m_fsEasu, m_fsrTargetView, dstRect,
+      srcView, srcRect, m_samplerGamma, &args, sizeof(args));
+
+    this->draw(ctx, m_fsRcas, dstView, dstRect,
+      m_fsrSampleView, dstRect, m_samplerGamma, &args, sizeof(args));
+  }
+
+
+  void DxvkSwapchainBlitter::logFsr(
+          VkExtent3D          src,
+          VkExtent3D          dst,
+          const char*         reason) {
+    bool active = reason == nullptr;
+
+    bool changed = m_fsrLogSrc != src
+                || m_fsrLogDst != dst
+                || m_fsrLogActive != active;
+
+    if (!changed)
+      return;
+
+    m_fsrLogSrc    = src;
+    m_fsrLogDst    = dst;
+    m_fsrLogActive = active;
+
+    if (active) {
+      Logger::info(str::format("panDXVK: fsr: upscaling ",
+        src.width, "x", src.height, " -> ", dst.width, "x", dst.height,
+        ", sharpness=", m_fsrSharpness));
+    } else {
+      Logger::info(str::format("panDXVK: fsr: not applied (", reason, "), back buffer ",
+        src.width, "x", src.height, ", output ", dst.width, "x", dst.height));
+    }
+  }
+
+
   void DxvkSwapchainBlitter::createSampler() {
     DxvkSamplerCreateInfo samplerInfo;
     samplerInfo.magFilter       = VK_FILTER_LINEAR;
@@ -318,6 +463,8 @@ namespace dxvk {
     SpirvCodeBuffer fsCodeCopy(dxvk_present_frag);
     SpirvCodeBuffer fsCodeResolve(dxvk_present_frag_ms);
     SpirvCodeBuffer fsCodeResolveAmd(dxvk_present_frag_ms_amd);
+    SpirvCodeBuffer fsCodeEasu(dxvk_fsr_easu_frag);
+    SpirvCodeBuffer fsCodeRcas(dxvk_fsr_rcas_frag);
     
     const std::array<DxvkResourceSlot, 2> fsResourceSlots = {{
       { BindingIds::Image, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
@@ -343,6 +490,14 @@ namespace dxvk {
     m_fsResolve = new DxvkShader(fsInfo, m_device->extensions().amdShaderFragmentMask
       ? std::move(fsCodeResolveAmd)
       : std::move(fsCodeResolve));
+
+    if (m_fsrEnabled) {
+      DxvkShaderCreateInfo fsrInfo = fsInfo;
+      fsrInfo.inputMask = 0;
+      fsrInfo.pushConstSize = sizeof(FsrArgs);
+      m_fsEasu = new DxvkShader(fsrInfo, std::move(fsCodeEasu));
+      m_fsRcas = new DxvkShader(fsrInfo, std::move(fsCodeRcas));
+    }
   }
 
   void DxvkSwapchainBlitter::createResolveImage(const DxvkImageCreateInfo& info) {
@@ -383,6 +538,44 @@ namespace dxvk {
   void DxvkSwapchainBlitter::destroyResolveImage() {
     m_resolveImage = nullptr;
     m_resolveView = nullptr;
+  }
+
+
+  void DxvkSwapchainBlitter::createFsrImage(
+          VkExtent3D          extent,
+          VkFormat            format) {
+    DxvkImageCreateInfo imgInfo;
+    imgInfo.type = VK_IMAGE_TYPE_2D;
+    imgInfo.format = format;
+    imgInfo.flags = 0;
+    imgInfo.sampleCount = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.extent = extent;
+    imgInfo.numLayers = 1;
+    imgInfo.mipLevels = 1;
+    imgInfo.usage  = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+                   | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imgInfo.stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                   | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    imgInfo.access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                   | VK_ACCESS_SHADER_READ_BIT;
+    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    m_fsrImage = m_device->createImage(imgInfo, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    DxvkImageViewCreateInfo viewInfo;
+    viewInfo.type = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = format;
+    viewInfo.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.minLevel  = 0;
+    viewInfo.numLevels = 1;
+    viewInfo.minLayer  = 0;
+    viewInfo.numLayers = 1;
+
+    viewInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    m_fsrTargetView = m_device->createImageView(m_fsrImage, viewInfo);
+
+    viewInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+    m_fsrSampleView = m_device->createImageView(m_fsrImage, viewInfo);
   }
 
 }
