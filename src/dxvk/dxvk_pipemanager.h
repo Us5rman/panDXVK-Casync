@@ -135,8 +135,8 @@ namespace dxvk {
     std::atomic<uint32_t>     m_numComputePipelines  = { 0 };
     std::atomic<uint32_t>     m_numGraphicsPipelines = { 0 };
 
-    bool                      m_gplAsyncCache = false;
     bool                      m_asyncLog = false;
+    bool                      m_dyasyncEnabled = false;
     bool                      m_gplRequested = false;
 
     std::atomic<bool>         m_gplLibraries = { false };

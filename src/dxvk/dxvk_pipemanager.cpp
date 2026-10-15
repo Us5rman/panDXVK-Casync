@@ -37,7 +37,7 @@ namespace dxvk {
                : "libraries unavailable on this device, running mode 1"));
     }
 
-    if (options.enableAsync || options.enableGplAsync) {
+    if (options.enableAsync || options.enableGplAsync || options.enableDyAsync) {
       int32_t numThreads = options.numAsyncThreads;
 
       if (numThreads <= 0) {
@@ -45,8 +45,8 @@ namespace dxvk {
         numThreads = std::clamp(numThreads, 1, 8);
       }
 
-      m_gplAsyncCache = options.enableGplAsync;
       m_asyncLog = options.enableAsyncLog;
+      m_dyasyncEnabled = options.enableDyAsync;
       m_compiler = std::make_unique<DxvkPipelineCompiler>(uint32_t(numThreads), m_asyncLog);
 
       if (m_asyncLog) {
@@ -54,7 +54,8 @@ namespace dxvk {
           && env::getEnvVar("DXVK_STATE_CACHE") != "0";
 
         Logger::info(str::format("panDXVK async: logging on, mode=",
-          options.enableGplAsync ? "gplasync" : "async",
+          options.enableGplAsync ? "gplasync"
+            : options.enableDyAsync ? "dyasync" : "async",
           ", worker threads=", numThreads,
           ", state cache=", cacheOn ? "on" : "off"));
       }

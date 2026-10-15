@@ -100,8 +100,20 @@ namespace dxvk {
       return VK_NULL_HANDLE;
     }
 
-    // Hand the pipeline to the async compiler and skip the draw
-    if (m_pipeMgr->m_compiler != nullptr) {
+    // Hand the pipeline to the async compiler. Dyasync draws with a
+    // fallback pipeline while the real one compiles, so the frame keeps
+    // moving; plain async skips the draw instead.
+    if (m_pipeMgr->m_dyasyncEnabled && m_pipeMgr->m_compiler != nullptr) {
+      VkPipeline fallback = this->findFallback(renderPass);
+
+      if (fallback != VK_NULL_HANDLE) {
+        m_pipeMgr->m_compiler->queueCompilation(this, state, renderPass);
+        return fallback;
+      }
+
+      // No fallback for this render pass yet, so compile inline below.
+      // That pass seeds the map, and every state vector after it draws.
+    } else if (m_pipeMgr->m_compiler != nullptr) {
       m_pipeMgr->m_compiler->queueCompilation(this, state, renderPass);
       return VK_NULL_HANDLE;
     }
@@ -278,7 +290,7 @@ namespace dxvk {
     if (!instance) {
       instance = this->createInstance(state, renderPass);
 
-      if (m_pipeMgr->m_gplAsyncCache && instance->pipeline() != VK_NULL_HANDLE) {
+      if (instance->pipeline() != VK_NULL_HANDLE) {
         this->writePipelineStateToCache(state, renderPass->format());
 
         if (m_pipeMgr->m_asyncLog) {

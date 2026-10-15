@@ -71,10 +71,24 @@ session.
 
 ### 3.2 Gplasync mode 1
 
-Same as basic async, and every background-compiled pipeline is also written to the
-state cache. On the next launch the state cache precompiles those pipelines at
-startup, so fewer draws are skipped. A pipeline the driver failed to build is not
+Same as basic async, including the state cache write. Every background-compiled
+pipeline is written to the state cache, so on the next launch it precompiles at
+startup and fewer draws are skipped. A pipeline the driver failed to build is not
 written.
+
+That write was originally gated so that it happened only under mode 1 or 2, which
+left `PANDXVK_ASYNC=1` persisting nothing: its skipped draws recurred on every
+launch, because the cache had nothing to precompile. The gate has been removed and
+the write is now unconditional on a successful compile, on the same footing as the
+sync path in `getPipelineHandle` and the compute path in `dxvk_compute.cpp`. The
+worker reaches it either way — `DxvkPipelineCompiler::runWorker` calls
+`compilePipelineAsync`, so this covers basic async and dyasync alike.
+
+Consequence worth stating plainly: with mode 2 off, mode 1 and `PANDXVK_ASYNC=1`
+now take the same path, so mode 1 no longer buys anything basic async does not. It
+is kept so existing configurations and log lines keep describing themselves the
+same way. Mode 2 remains the mode that differs in code, by enabling graphics
+pipeline libraries.
 
 ### 3.3 Gplasync mode 2 (graphics pipeline libraries)
 
@@ -110,11 +124,35 @@ libraries, compiled separately and linked:
   can use libraries:
   `panDXVK: graphics pipeline library: feature=1, fast linking=1, ... -> usable by PANDXVK_GPLASYNC=2`
 
+### 3.5 Dyasync
+
+Dyasync is the mode that neither stalls nor drops the draw. When a state vector
+has no compiled instance, `getPipelineHandle` asks `findFallback` for any
+pipeline already compiled against the same render-pass key, hands that to the
+draw, and queues the real pipeline on the same workers basic async uses.
+
+The fallback map lives on `DxvkGraphicsPipeline` and `createInstance` writes into
+it for every pipeline that compiles, so it fills as the frame proceeds. The first
+draw of a pass therefore has nothing to return and compiles inline, which also
+seeds the map; every state vector after it draws. A pass whose pipelines are all
+still queued falls through to the inline compile the same way.
+
+This is what separates it from basic async: it shows a pipeline belonging to the
+same render pass rather than nothing at all, and in exchange it shows a *different*
+pipeline from the one the draw asked for.
+
+Enabled with `PANDXVK_DYASYNC=1` or `dxvk.enableDyAsync = true`, default off. It
+creates no thread pool of its own — it shares `m_compiler` with `PANDXVK_ASYNC`
+and `PANDXVK_GPLASYNC`, which is why it is only built when one of the three is
+set. Where dyasync and basic async are both set, dyasync takes the branch and
+basic async's drop-the-draw path does not run.
+
 ## 4. Variables and configuration
 
 | Variable | `dxvk.conf` key | Meaning |
 |---|---|---|
 | `PANDXVK_ASYNC=1` | `dxvk.enableAsync` | Basic async. |
+| `PANDXVK_DYASYNC=1` | `dxvk.enableDyAsync` | Dyasync. Draws a fallback pipeline while the real one compiles. Takes the branch over basic async. |
 | `PANDXVK_GPLASYNC=1` | `dxvk.enableGplAsync` | Mode 1. |
 | `PANDXVK_GPLASYNC=2` | `dxvk.gplAsyncMode = 2` | Mode 2. Runs as mode 1 if the device cannot use libraries. |
 | `PANDXVK_ASYNC_LOG=1` | `dxvk.asyncLog` | Log async activity. |

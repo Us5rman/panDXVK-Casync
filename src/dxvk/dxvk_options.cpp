@@ -50,7 +50,6 @@ namespace dxvk {
     lowerSinCos           = config.getOption<Tristate>("dxvk.lowerSinCos",            Tristate::Auto);
     auto budget = config.getOption<int32_t>("dxvk.maxMemoryBudget", 0);
     maxMemoryBudget = VkDeviceSize(std::max(budget, 0)) << 20u;
-    shaderCompilationMethod = config.getOption<std::string>("dxvk.shaderCompilationMethod", "dyasync");
     framePace        = config.getOption<std::string>("dxvk.framePace", "");
     lowLatencyOffset  = config.getOption<int32_t>     ("dxvk.lowLatencyOffset", 0);
     numShaderCompilerThreads = config.getOption<int32_t>("dxvk.numShaderCompilerThreads", 0);
