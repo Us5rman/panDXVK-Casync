@@ -46,7 +46,7 @@ panDXVK uses the same configuration mechanism as upstream DXVK. Set `DXVK_CONFIG
 | `DXVK_LOG_LEVEL` | `none`, `error`, `warn`, `info`, `debug` | Logging verbosity. Transcode markers (`remap VkImage`, `initializer upload`, `SRV`/`RTV BC→ASTC`) need `debug` — they are runtime-gated, so no special build is required. |
 | `DXVK_LOG_PATH` | path | Directory for log files. |
 | `DXVK_FRAME_RATE` | `0` (uncap), or FPS limit | Frame rate cap. |
-| `PANDXVK_FORCE_TRANSCODE` | `0`, `1`, or any value other than unset/empty/`0` | **Essential on wrapper setups.** Forces BC→ASTC even when the driver claims BC support, which is what actually activates the transcode where a wrapper's BCN layer fakes the feature. Adds CPU overhead and ASTC loss — leave it unset on builds that already transcode automatically. Needs game restart. |
+| `PANDXVK_FORCE_TRANSCODE` | `0`, `1`, or any value other than unset/empty/`0` | **Essential on wrapper setups.** Forces BC→ASTC even when the driver claims BC support, which is what actually activates the transcode where a wrapper's BCN layer fakes the feature. Adds CPU overhead and ASTC loss — leave it unset on builds that already transcode automatically. Needs game restart. ⚠️ **Never combine with an updated wrapper BCN layer** — see [Why Some Users Need the BC Wrapper](#why-some-users-need-the-bc-wrapper-and-others-dont). |
 | `PANDXVK_TELEMETRY` | `1` | Enables the CSV timeline and report writer. Off by default. |
 | `PANDXVK_REPORT_DIR` | path | Directory for telemetry output. |
 
@@ -146,6 +146,19 @@ So:
 The fix:
 The transcode gate is kept intentionally — modern wrappers carry the BCN layer, so the pipeline stays dormant behind `!textureCompressionBC` until a wrapper-free device appears. **In practice that means the automatic arm does not open on a wrapped device, and `PANDXVK_FORCE_TRANSCODE=1` is what actually activates BC→ASTC.** Release builds now set `-Db_ndebug=true`, so per-block timing, statistics and the encoder's runtime `assert()`s are compiled out. The four transcode markers (`remap VkImage`, `initializer upload`, `SRV`/`RTV BC→ASTC`) are deliberately *not* `NDEBUG`-gated — they are functional evidence, not diagnostics — and are gated at runtime on `DXVK_LOG_LEVEL=debug`, so they cost nothing by default but remain available on demand.
 
+> **⚠️ Do not pair the transcode with an updated wrapper BCN layer.**
+>
+> Charan's build (`GunaCharanTeja/WinlatorMali`, branch `bionic-mali-1.0`) carries an
+> updated wrapper BCN layer that is already verified working as intended — it performs the
+> same BC→usable-texture conversion in effect that panDXVK's transcode performs. Setting
+> `PANDXVK_FORCE_TRANSCODE=1` alongside it puts both mechanisms on the same textures, and
+> they conflict.
+>
+> **Use one or the other, never both.** If your setup's wrapper BCN layer is already
+> delivering correct textures, leave `PANDXVK_FORCE_TRANSCODE` unset. Set it only where a
+> wrapper advertises `textureCompressionBC` but its layer does *not* produce working
+> textures — in that case the flag is what activates BC→ASTC.
+
 ## Validation Status
 
 > **panDXVK v01 is not yet device-validated.** It is a large cross-project merge that
@@ -196,13 +209,25 @@ Reported by testers in the field — recorded here as observed, not independentl
 
 - [doitsujin/dxvk](https://github.com/doitsujin/dxvk) — upstream DXVK
 - [pythonlover02/dxvk-sarek](https://github.com/pythonlover02/dxvk-sarek) — Sarek fork
-- [Us5rman](https://github.com/Us5rman) — the asynchronous pipeline compiler (PR #1, "Async and GPlasync"): `dxvk_pipecompiler.*`, `dxvk_graphics_lib.cpp`, the `PANDXVK_ASYNC` / `PANDXVK_GPLASYNC` modes, the GPL device gating and `docs/async-notes.md`
+- [Us5rman](https://github.com/Us5rman) — author of PR #1, "Async and GPlasync", and the one behind the asynchronous pipeline idea itself: `dxvk_pipecompiler.*`, `dxvk_graphics_lib.cpp`, the `PANDXVK_ASYNC` / `PANDXVK_GPLASYNC` modes, the GPL device gating and `docs/async-notes.md`
 - [Ph42oN/dxvk-gplasync](https://github.com/Ph42oN/dxvk-gplasync) — the gplasync implementation that work derives from
 - [Wonderkast](https://github.com/wonderkast) — BC7/ASTC technical review, lead of panVK for Mali G720
 - [leegao/bcn_layer](https://github.com/leegao/bcn_layer) — BCN wrapper layer reference
 - [richgel999/bc7enc](https://github.com/richgel999/bc7enc) — BC7 differential oracle
 - [iOrange/bcdec](https://github.com/iOrange/bcdec) — BC6H differential oracle (MIT)
 - [isygold/panDXVK-logs](https://github.com/isygold/panDXVK-logs) — community log repo
+
+### Testers
+
+Every finding in [Testers' Findings](#testers-findings) above is theirs, not ours — they ran these builds on Mali hardware we cannot test on ourselves, and every diagnosis in the early releases traces back to their files. Where a finding is marked reported rather than independently verified, that is deliberate: it is their observation, recorded as they gave it.
+
+- **Gustave** (Mali-G52) — the most consistent logger of the project. Nine Sols, Silksong and Sugary Spire logs, plus the wine logs that named the early crash. Delivered the 9-zip A/B matrix (3 games × {no force, force wrapper 0, force wrapper 1}); first reported the in-game texture-corruption pattern and the "hazy fog" artifact that subsequently drove a dedicated ground-truth A/B investigation; measured the RAM drop twice, both runs landing in the 5–8% band.
+- **Us5rman** (Mali-G615) — AIO/FPS baselines and the FF7, MOTORSLICE and NFS reports that mapped the early territory. Author of PR #1, and the one behind the asynchronous pipeline idea — see the contributor credit above.
+- **@UriYuanKerr69** (Mali-G52) — Cult of PiN on the v2 and v3 builds with screenshots, Dead Cells, Streets of Rogue and Loopler reports.
+- **LORD** (Mali-G720) — Silksong and long-session NFS13 logs on new silicon.
+- **Lloyd** (Mali-G615) — DMC5 and GTA V runs, crash forensics and shader dumps. Ran the stock DXVK 1.10.3 control on the same driver and same game, which isolated panDXVK itself as the variable rather than panVK or the blob driver. Established that the real variable name is `WRAPPER_NO_PATCH_OPCONSTCOMP` and not the shorter spellings, and found the `WRAPPER_NO_PATCH_OPCONSTCOMP` + PanVK + panDXVK stack that fixed the misrendering titles. Maintains the GTA V personal build, [`panDXVK-lloyd262`](https://github.com/isygold/panDXVK-lloyd262).
+- **DUCKTEN** (Mali-G615) — NFS and AC3SP sessions.
+- **Charan** — [`GunaCharanTeja/WinlatorMali`](https://github.com/GunaCharanTeja/WinlatorMali), branch `bionic-mali-1.0`. His wrapper BCN layer is the reported working exception to the otherwise unimproved BCN software layer, and the direct basis for the transcode/wrapper conflict warning above.
 
 ## Upstream DXVK Reference
 - Upstream DXVK: [doitsujin/dxvk](https://github.com/doitsujin/dxvk)
