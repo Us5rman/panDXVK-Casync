@@ -37,5 +37,5 @@ void main() {
   AF1 b;
   FsrRcasF(r, g, b, AU2(gl_FragCoord.xy), con);
 
-  o_color = vec4(r, g, b, 1.0) * vec4(1.0, 0.5, 0.5, 1.0);
+  o_color = vec4(r, g, b, 1.0);
 }
