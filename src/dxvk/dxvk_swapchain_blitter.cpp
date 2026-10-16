@@ -370,7 +370,7 @@ namespace dxvk {
   }
 
 
- void DxvkSwapchainBlitter::presentFsr(
+  void DxvkSwapchainBlitter::presentFsr(
           DxvkContext*        ctx,
     const Rc<DxvkImageView>&  dstView,
     const Rc<DxvkImageView>&  srcView) {
@@ -402,7 +402,7 @@ namespace dxvk {
 
     this->draw(ctx, m_fsRcas, dstView, dstRect,
       m_fsrSampleView, dstRect, m_samplerGamma, &args, sizeof(args));
- }
+  }
 
 
   void DxvkSwapchainBlitter::logFsr(
