@@ -7,9 +7,15 @@
 
 #include "../util/util_env.h"
 
+#include "shaders/AreaTex.h"
+#include "shaders/SearchTex.h"
+
 #include <dxvk_fsr_easu_frag.h>
 #include <dxvk_fsr_rcas_frag.h>
 #include <dxvk_fxaa_frag.h>
+#include <dxvk_smaa_blend_frag.h>
+#include <dxvk_smaa_edge_frag.h>
+#include <dxvk_smaa_weights_frag.h>
 #include <dxvk_present_frag.h>
 #include <dxvk_present_frag_blit.h>
 #include <dxvk_present_frag_ms.h>
@@ -58,13 +64,17 @@ namespace dxvk {
 
     Rc<DxvkImageView> source = srcView;
 
-    if (m_aaMode == AaMode::Fxaa) {
+    if (m_aaMode != AaMode::None) {
       const char* aaReason = this->aaBlockReason(srcView, srcRect);
 
       this->logAa(srcView->imageInfo().extent, aaReason);
 
       if (!aaReason) {
-        this->presentAa(ctx, srcView);
+        if (m_aaMode == AaMode::Smaa)
+          this->presentSmaa(ctx, srcView);
+        else
+          this->presentAa(ctx, srcView);
+
         source = m_aaSampleView;
       }
     }
@@ -148,7 +158,9 @@ namespace dxvk {
           VkRect2D            srcRect,
     const Rc<DxvkSampler>&    sampler,
     const void*               pushData,
-          uint32_t            pushSize) {
+          uint32_t            pushSize,
+    const ExtraBindings*      extra,
+          bool                clearTarget) {
     DxvkInputAssemblyState iaState;
     iaState.primitiveTopology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
     iaState.primitiveRestart  = VK_FALSE;
@@ -226,7 +238,7 @@ namespace dxvk {
       dstView->imageInfo().extent.width,
       dstView->imageInfo().extent.height };
 
-    if (dstRect.extent == dstExtent)
+    if (dstRect.extent == dstExtent && !clearTarget)
       ctx->discardImageView(dstView, VK_IMAGE_ASPECT_COLOR_BIT);
     else
       ctx->clearRenderTarget(dstView, VK_IMAGE_ASPECT_COLOR_BIT, VkClearValue());
@@ -237,10 +249,20 @@ namespace dxvk {
       imageSampler = sampler;
 
     ctx->bindResourceSampler(BindingIds::Image, imageSampler);
-    ctx->bindResourceSampler(BindingIds::Gamma, m_samplerGamma);
-
     ctx->bindResourceView(BindingIds::Image, srcView, nullptr);
-    ctx->bindResourceView(BindingIds::Gamma, m_gammaView, nullptr);
+
+    if (extra != nullptr && extra->view1 != nullptr) {
+      ctx->bindResourceSampler(1, extra->sampler1);
+      ctx->bindResourceView(1, extra->view1, nullptr);
+    } else {
+      ctx->bindResourceSampler(BindingIds::Gamma, m_samplerGamma);
+      ctx->bindResourceView(BindingIds::Gamma, m_gammaView, nullptr);
+    }
+
+    if (extra != nullptr && extra->view2 != nullptr) {
+      ctx->bindResourceSampler(2, extra->sampler2);
+      ctx->bindResourceView(2, extra->view2, nullptr);
+    }
 
     ctx->bindShader(VK_SHADER_STAGE_VERTEX_BIT, m_vs);
     ctx->bindShader(VK_SHADER_STAGE_FRAGMENT_BIT, fs);
@@ -465,7 +487,8 @@ namespace dxvk {
       m_aaMode = AaMode::Fxaa;
       Logger::info("panDXVK: aa: FXAA enabled");
     } else if (value == "SMAA") {
-      Logger::warn("panDXVK: aa: SMAA is not available in this build yet, anti-aliasing stays off");
+      m_aaMode = AaMode::Smaa;
+      Logger::info("panDXVK: aa: SMAA enabled");
     } else if (value != "0" && value != "OFF" && value != "NONE") {
       Logger::warn(str::format("panDXVK: aa: unknown PANDXVK_AA value '", value, "', anti-aliasing stays off"));
     }
@@ -523,13 +546,184 @@ namespace dxvk {
     m_aaLogSrc    = src;
     m_aaLogActive = active;
 
+    const char* name = m_aaMode == AaMode::Smaa ? "SMAA" : "FXAA";
+
     if (active) {
-      Logger::info(str::format("panDXVK: aa: FXAA applied at ",
+      Logger::info(str::format("panDXVK: aa: ", name, " applied at ",
         src.width, "x", src.height));
     } else {
-      Logger::info(str::format("panDXVK: aa: not applied (", reason, "), back buffer ",
+      Logger::info(str::format("panDXVK: aa: ", name, " not applied (", reason, "), back buffer ",
         src.width, "x", src.height));
     }
+  }
+
+
+  void DxvkSwapchainBlitter::presentSmaa(
+          DxvkContext*        ctx,
+    const Rc<DxvkImageView>&  srcView) {
+    if (!m_smaaReady)
+      this->uploadSmaaTextures(ctx);
+
+    VkExtent3D extent = srcView->imageInfo().extent;
+    VkFormat   format = srcView->info().format;
+
+    if (m_aaImage == nullptr
+     || m_aaImage->info().extent != extent
+     || m_aaImage->info().format != format)
+      this->createAaImage(extent, format);
+
+    if (m_smaaEdgesImage == nullptr
+     || m_smaaEdgesImage->info().extent != extent)
+      this->createSmaaImages(extent);
+
+    AaArgs args;
+    args.extent = { extent.width, extent.height };
+
+    VkRect2D rect = { { 0, 0 }, { extent.width, extent.height } };
+
+    this->draw(ctx, m_fsSmaaEdge, m_smaaEdgesTargetView, rect,
+      srcView, rect, m_samplerGamma, &args, sizeof(args), nullptr, true);
+
+    ExtraBindings weightBindings;
+    weightBindings.view1    = m_smaaAreaView;
+    weightBindings.sampler1 = m_samplerGamma;
+    weightBindings.view2    = m_smaaSearchView;
+    weightBindings.sampler2 = m_samplerPoint;
+
+    this->draw(ctx, m_fsSmaaWeights, m_smaaBlendTargetView, rect,
+      m_smaaEdgesSampleView, rect, m_samplerGamma, &args, sizeof(args), &weightBindings);
+
+    ExtraBindings blendBindings;
+    blendBindings.view1    = m_smaaBlendSampleView;
+    blendBindings.sampler1 = m_samplerGamma;
+
+    this->draw(ctx, m_fsSmaaBlend, m_aaTargetView, rect,
+      srcView, rect, m_samplerGamma, &args, sizeof(args), &blendBindings);
+  }
+
+
+  void DxvkSwapchainBlitter::uploadSmaaTextures(
+          DxvkContext*        ctx) {
+    this->uploadTexture(ctx, m_smaaAreaImage, m_smaaAreaView,
+      VK_FORMAT_R8G8_UNORM, AREATEX_WIDTH, AREATEX_HEIGHT,
+      areaTexBytes, AREATEX_SIZE);
+
+    this->uploadTexture(ctx, m_smaaSearchImage, m_smaaSearchView,
+      VK_FORMAT_R8_UNORM, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT,
+      searchTexBytes, SEARCHTEX_SIZE);
+
+    m_smaaReady = true;
+  }
+
+
+  void DxvkSwapchainBlitter::uploadTexture(
+          DxvkContext*        ctx,
+          Rc<DxvkImage>&      image,
+          Rc<DxvkImageView>&  view,
+          VkFormat            format,
+          uint32_t            width,
+          uint32_t            height,
+    const unsigned char*      data,
+          VkDeviceSize        size) {
+    DxvkImageCreateInfo imgInfo;
+    imgInfo.type        = VK_IMAGE_TYPE_2D;
+    imgInfo.format      = format;
+    imgInfo.flags       = 0;
+    imgInfo.sampleCount = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.extent      = { width, height, 1 };
+    imgInfo.numLayers   = 1;
+    imgInfo.mipLevels   = 1;
+    imgInfo.usage       = VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                        | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imgInfo.stages      = VK_PIPELINE_STAGE_TRANSFER_BIT
+                        | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    imgInfo.access      = VK_ACCESS_TRANSFER_WRITE_BIT
+                        | VK_ACCESS_SHADER_READ_BIT;
+    imgInfo.tiling      = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.layout      = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image = m_device->createImage(imgInfo, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    DxvkImageViewCreateInfo viewInfo;
+    viewInfo.type       = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format     = format;
+    viewInfo.usage      = VK_IMAGE_USAGE_SAMPLED_BIT;
+    viewInfo.aspect     = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.minLevel   = 0;
+    viewInfo.numLevels  = 1;
+    viewInfo.minLayer   = 0;
+    viewInfo.numLayers  = 1;
+    view = m_device->createImageView(image, viewInfo);
+
+    DxvkBufferCreateInfo bufInfo;
+    bufInfo.size   = size;
+    bufInfo.usage  = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bufInfo.stages = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    bufInfo.access = VK_ACCESS_TRANSFER_READ_BIT;
+
+    Rc<DxvkBuffer> buffer = m_device->createBuffer(bufInfo,
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    DxvkBufferSliceHandle slice = buffer->allocSlice();
+    std::memcpy(slice.mapPtr, data, size);
+
+    ctx->invalidateBuffer(buffer, slice);
+    ctx->copyBufferToImage(image,
+      VkImageSubresourceLayers { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+      VkOffset3D { 0, 0, 0 },
+      VkExtent3D { width, height, 1 },
+      buffer, 0, 0, 0);
+  }
+
+
+  void DxvkSwapchainBlitter::createSmaaImages(
+          VkExtent3D          extent) {
+    this->createTarget(extent, VK_FORMAT_R8G8_UNORM,
+      m_smaaEdgesImage, m_smaaEdgesTargetView, m_smaaEdgesSampleView);
+
+    this->createTarget(extent, VK_FORMAT_R8G8B8A8_UNORM,
+      m_smaaBlendImage, m_smaaBlendTargetView, m_smaaBlendSampleView);
+  }
+
+
+  void DxvkSwapchainBlitter::createTarget(
+          VkExtent3D          extent,
+          VkFormat            format,
+          Rc<DxvkImage>&      image,
+          Rc<DxvkImageView>&  targetView,
+          Rc<DxvkImageView>&  sampleView) {
+    DxvkImageCreateInfo imgInfo;
+    imgInfo.type = VK_IMAGE_TYPE_2D;
+    imgInfo.format = format;
+    imgInfo.flags = 0;
+    imgInfo.sampleCount = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.extent = extent;
+    imgInfo.numLayers = 1;
+    imgInfo.mipLevels = 1;
+    imgInfo.usage  = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+                   | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imgInfo.stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                   | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    imgInfo.access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                   | VK_ACCESS_SHADER_READ_BIT;
+    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image = m_device->createImage(imgInfo, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    DxvkImageViewCreateInfo viewInfo;
+    viewInfo.type = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = format;
+    viewInfo.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.minLevel  = 0;
+    viewInfo.numLevels = 1;
+    viewInfo.minLayer  = 0;
+    viewInfo.numLayers = 1;
+
+    viewInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    targetView = m_device->createImageView(image, viewInfo);
+
+    viewInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+    sampleView = m_device->createImageView(image, viewInfo);
   }
 
 
@@ -558,6 +752,10 @@ namespace dxvk {
     samplerInfo.addressModeW    = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     samplerInfo.usePixelCoord   = VK_FALSE;
     m_samplerGamma = m_device->createSampler(samplerInfo);
+
+    samplerInfo.magFilter       = VK_FILTER_NEAREST;
+    samplerInfo.minFilter       = VK_FILTER_NEAREST;
+    m_samplerPoint = m_device->createSampler(samplerInfo);
   }
 
   void DxvkSwapchainBlitter::createShaders() {
@@ -569,6 +767,9 @@ namespace dxvk {
     SpirvCodeBuffer fsCodeEasu(dxvk_fsr_easu_frag);
     SpirvCodeBuffer fsCodeRcas(dxvk_fsr_rcas_frag);
     SpirvCodeBuffer fsCodeFxaa(dxvk_fxaa_frag);
+    SpirvCodeBuffer fsCodeSmaaEdge(dxvk_smaa_edge_frag);
+    SpirvCodeBuffer fsCodeSmaaWeights(dxvk_smaa_weights_frag);
+    SpirvCodeBuffer fsCodeSmaaBlend(dxvk_smaa_blend_frag);
     
     const std::array<DxvkResourceSlot, 2> fsResourceSlots = {{
       { BindingIds::Image, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
@@ -608,6 +809,39 @@ namespace dxvk {
       aaInfo.inputMask = 0;
       aaInfo.pushConstSize = sizeof(AaArgs);
       m_fsFxaa = new DxvkShader(aaInfo, std::move(fsCodeFxaa));
+    }
+
+    if (m_aaMode == AaMode::Smaa) {
+      const std::array<DxvkResourceSlot, 1> smaaEdgeSlots = {{
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
+      }};
+
+      const std::array<DxvkResourceSlot, 3> smaaWeightSlots = {{
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
+        { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
+        { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
+      }};
+
+      const std::array<DxvkResourceSlot, 2> smaaBlendSlots = {{
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
+        { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
+      }};
+
+      DxvkShaderCreateInfo smaaInfo = fsInfo;
+      smaaInfo.inputMask = 0;
+      smaaInfo.pushConstSize = sizeof(AaArgs);
+
+      smaaInfo.resourceSlotCount = smaaEdgeSlots.size();
+      smaaInfo.resourceSlots = smaaEdgeSlots.data();
+      m_fsSmaaEdge = new DxvkShader(smaaInfo, std::move(fsCodeSmaaEdge));
+
+      smaaInfo.resourceSlotCount = smaaWeightSlots.size();
+      smaaInfo.resourceSlots = smaaWeightSlots.data();
+      m_fsSmaaWeights = new DxvkShader(smaaInfo, std::move(fsCodeSmaaWeights));
+
+      smaaInfo.resourceSlotCount = smaaBlendSlots.size();
+      smaaInfo.resourceSlots = smaaBlendSlots.data();
+      m_fsSmaaBlend = new DxvkShader(smaaInfo, std::move(fsCodeSmaaBlend));
     }
   }
 
