@@ -75,6 +75,16 @@ namespace dxvk {
       float      rcasStops;
     };
 
+    struct AaArgs {
+      VkExtent2D extent;
+    };
+
+    enum class AaMode : uint32_t {
+      None,
+      Fxaa,
+      Smaa,
+    };
+
     Rc<DxvkDevice>      m_device;
 
     Rc<DxvkShader>      m_fsCopy;
@@ -84,6 +94,7 @@ namespace dxvk {
 
     Rc<DxvkShader>      m_fsEasu;
     Rc<DxvkShader>      m_fsRcas;
+    Rc<DxvkShader>      m_fsFxaa;
 
     Rc<DxvkBuffer>      m_gammaBuffer;
     Rc<DxvkImage>       m_gammaImage;
@@ -99,6 +110,10 @@ namespace dxvk {
     Rc<DxvkImageView>   m_fsrTargetView;
     Rc<DxvkImageView>   m_fsrSampleView;
 
+    Rc<DxvkImage>       m_aaImage;
+    Rc<DxvkImageView>   m_aaTargetView;
+    Rc<DxvkImageView>   m_aaSampleView;
+
     Rc<DxvkSampler>     m_samplerPresent;
     Rc<DxvkSampler>     m_samplerGamma;
 
@@ -109,6 +124,10 @@ namespace dxvk {
     VkExtent3D          m_fsrLogSrc    = { 0, 0, 0 };
     VkExtent3D          m_fsrLogDst    = { 0, 0, 0 };
     bool                m_fsrLogActive = false;
+
+    AaMode              m_aaMode       = AaMode::None;
+    VkExtent3D          m_aaLogSrc     = { 0, 0, 0 };
+    bool                m_aaLogActive  = false;
 
     void draw(
             DxvkContext*        ctx,
@@ -145,6 +164,24 @@ namespace dxvk {
             VkExtent3D          src,
             VkExtent3D          dst,
             const char*         reason);
+
+    void readAaConfig();
+
+    const char* aaBlockReason(
+      const Rc<DxvkImageView>&  srcView,
+            VkRect2D            srcRect) const;
+
+    void presentAa(
+            DxvkContext*        ctx,
+      const Rc<DxvkImageView>&  srcView);
+
+    void logAa(
+            VkExtent3D          src,
+            const char*         reason);
+
+    void createAaImage(
+            VkExtent3D          extent,
+            VkFormat            format);
 
     void createSampler();
 
