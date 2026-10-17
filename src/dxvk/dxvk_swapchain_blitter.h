@@ -79,6 +79,13 @@ namespace dxvk {
       VkExtent2D extent;
     };
 
+    struct ExtraBindings {
+      Rc<DxvkImageView> view1;
+      Rc<DxvkSampler>   sampler1;
+      Rc<DxvkImageView> view2;
+      Rc<DxvkSampler>   sampler2;
+    };
+
     enum class AaMode : uint32_t {
       None,
       Fxaa,
@@ -95,6 +102,9 @@ namespace dxvk {
     Rc<DxvkShader>      m_fsEasu;
     Rc<DxvkShader>      m_fsRcas;
     Rc<DxvkShader>      m_fsFxaa;
+    Rc<DxvkShader>      m_fsSmaaEdge;
+    Rc<DxvkShader>      m_fsSmaaWeights;
+    Rc<DxvkShader>      m_fsSmaaBlend;
 
     Rc<DxvkBuffer>      m_gammaBuffer;
     Rc<DxvkImage>       m_gammaImage;
@@ -114,8 +124,25 @@ namespace dxvk {
     Rc<DxvkImageView>   m_aaTargetView;
     Rc<DxvkImageView>   m_aaSampleView;
 
+    Rc<DxvkImage>       m_smaaEdgesImage;
+    Rc<DxvkImageView>   m_smaaEdgesTargetView;
+    Rc<DxvkImageView>   m_smaaEdgesSampleView;
+
+    Rc<DxvkImage>       m_smaaBlendImage;
+    Rc<DxvkImageView>   m_smaaBlendTargetView;
+    Rc<DxvkImageView>   m_smaaBlendSampleView;
+
+    Rc<DxvkImage>       m_smaaAreaImage;
+    Rc<DxvkImageView>   m_smaaAreaView;
+
+    Rc<DxvkImage>       m_smaaSearchImage;
+    Rc<DxvkImageView>   m_smaaSearchView;
+
+    bool                m_smaaReady = false;
+
     Rc<DxvkSampler>     m_samplerPresent;
     Rc<DxvkSampler>     m_samplerGamma;
+    Rc<DxvkSampler>     m_samplerPoint;
 
     bool                m_fsrEnabled   = false;
     float               m_fsrSharpness = 0.8f;
@@ -138,7 +165,9 @@ namespace dxvk {
             VkRect2D            srcRect,
       const Rc<DxvkSampler>&    sampler  = nullptr,
       const void*               pushData = nullptr,
-            uint32_t            pushSize = 0);
+            uint32_t            pushSize = 0,
+      const ExtraBindings*      extra = nullptr,
+            bool                clearTarget = false);
 
     void resolve(
             DxvkContext*        ctx,
@@ -178,6 +207,33 @@ namespace dxvk {
     void logAa(
             VkExtent3D          src,
             const char*         reason);
+
+    void presentSmaa(
+            DxvkContext*        ctx,
+      const Rc<DxvkImageView>&  srcView);
+
+    void uploadSmaaTextures(
+            DxvkContext*        ctx);
+
+    void uploadTexture(
+            DxvkContext*        ctx,
+            Rc<DxvkImage>&      image,
+            Rc<DxvkImageView>&  view,
+            VkFormat            format,
+            uint32_t            width,
+            uint32_t            height,
+      const unsigned char*      data,
+            VkDeviceSize        size);
+
+    void createSmaaImages(
+            VkExtent3D          extent);
+
+    void createTarget(
+            VkExtent3D          extent,
+            VkFormat            format,
+            Rc<DxvkImage>&      image,
+            Rc<DxvkImageView>&  targetView,
+            Rc<DxvkImageView>&  sampleView);
 
     void createAaImage(
             VkExtent3D          extent,
