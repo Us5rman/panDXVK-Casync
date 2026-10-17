@@ -43,6 +43,8 @@ dxvk_shaders = files([
   'shaders/dxvk_fsr_easu_frag.frag',
   'shaders/dxvk_fsr_rcas_frag.frag',
 
+  'shaders/dxvk_fxaa_frag.frag',
+
   'shaders/dxvk_resolve_frag_d.frag',
   'shaders/dxvk_resolve_frag_ds.frag',
   'shaders/dxvk_resolve_frag_f.frag',
