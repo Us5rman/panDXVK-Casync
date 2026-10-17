@@ -80,7 +80,9 @@ image is created.
 
 When the game's picture is smaller than the window:
 
-1. The second step sharpens that image and writes it to the window.
+1.the first step enlarges into a temporary image
+
+2. The second step sharpens that image and writes it to the window.
 
 ### 4.4 When FSR is skipped
 
