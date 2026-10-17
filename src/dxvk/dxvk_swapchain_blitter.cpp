@@ -1,6 +1,7 @@
 #include "dxvk_swapchain_blitter.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <string>
 
@@ -8,6 +9,7 @@
 
 #include <dxvk_fsr_easu_frag.h>
 #include <dxvk_fsr_rcas_frag.h>
+#include <dxvk_fxaa_frag.h>
 #include <dxvk_present_frag.h>
 #include <dxvk_present_frag_blit.h>
 #include <dxvk_present_frag_ms.h>
@@ -19,6 +21,7 @@ namespace dxvk {
   DxvkSwapchainBlitter::DxvkSwapchainBlitter(const Rc<DxvkDevice>& device)
   : m_device(device) {
     this->readFsrConfig();
+    this->readAaConfig();
     this->createSampler();
     this->createShaders();
   }
@@ -53,13 +56,26 @@ namespace dxvk {
         srcView->imageInfo().extent.height };
     }
 
-    if (m_fsrEnabled) {
-      const char* reason = this->fsrBlockReason(dstView, dstRect, srcView, srcRect);
+    Rc<DxvkImageView> source = srcView;
 
-      this->logFsr(srcView->imageInfo().extent, dstView->imageInfo().extent, reason);
+    if (m_aaMode == AaMode::Fxaa) {
+      const char* aaReason = this->aaBlockReason(srcView, srcRect);
+
+      this->logAa(srcView->imageInfo().extent, aaReason);
+
+      if (!aaReason) {
+        this->presentAa(ctx, srcView);
+        source = m_aaSampleView;
+      }
+    }
+
+    if (m_fsrEnabled) {
+      const char* reason = this->fsrBlockReason(dstView, dstRect, source, srcRect);
+
+      this->logFsr(source->imageInfo().extent, dstView->imageInfo().extent, reason);
 
       if (!reason) {
-        this->presentFsr(ctx, dstView, srcView);
+        this->presentFsr(ctx, dstView, source);
         this->destroyResolveImage();
         return;
       }
@@ -68,19 +84,19 @@ namespace dxvk {
     bool sameSize = dstRect.extent == srcRect.extent;
     bool usedResolveImage = false;
 
-    if (srcView->imageInfo().sampleCount == VK_SAMPLE_COUNT_1_BIT) {
+    if (source->imageInfo().sampleCount == VK_SAMPLE_COUNT_1_BIT) {
       this->draw(ctx, sameSize ? m_fsCopy : m_fsBlit,
-        dstView, dstRect, srcView, srcRect);
+        dstView, dstRect, source, srcRect);
     } else if (sameSize) {
       this->draw(ctx, m_fsResolve,
-        dstView, dstRect, srcView, srcRect);
+        dstView, dstRect, source, srcRect);
     } else {
         if (m_resolveImage == nullptr
-         || m_resolveImage->info().extent != srcView->imageInfo().extent
-         || m_resolveImage->info().format != srcView->imageInfo().format)
-          this->createResolveImage(srcView->imageInfo());
+         || m_resolveImage->info().extent != source->imageInfo().extent
+         || m_resolveImage->info().format != source->imageInfo().format)
+          this->createResolveImage(source->imageInfo());
 
-      this->resolve(ctx, m_resolveView, srcView);
+      this->resolve(ctx, m_resolveView, source);
       this->draw(ctx, m_fsBlit, dstView, dstRect, m_resolveView, srcRect);
 
       usedResolveImage = true;
@@ -436,6 +452,87 @@ namespace dxvk {
   }
 
 
+  void DxvkSwapchainBlitter::readAaConfig() {
+    std::string value = env::getEnvVar("PANDXVK_AA");
+
+    if (value.empty())
+      return;
+
+    for (char& ch : value)
+      ch = char(std::toupper(static_cast<unsigned char>(ch)));
+
+    if (value == "FXAA") {
+      m_aaMode = AaMode::Fxaa;
+      Logger::info("panDXVK: aa: FXAA enabled");
+    } else if (value == "SMAA") {
+      Logger::warn("panDXVK: aa: SMAA is not available in this build yet, anti-aliasing stays off");
+    } else if (value != "0" && value != "OFF" && value != "NONE") {
+      Logger::warn(str::format("panDXVK: aa: unknown PANDXVK_AA value '", value, "', anti-aliasing stays off"));
+    }
+  }
+
+
+  const char* DxvkSwapchainBlitter::aaBlockReason(
+    const Rc<DxvkImageView>&  srcView,
+          VkRect2D            srcRect) const {
+    VkExtent3D src = srcView->imageInfo().extent;
+
+    if (srcView->imageInfo().sampleCount != VK_SAMPLE_COUNT_1_BIT)
+      return "multisampled back buffer";
+
+    if (srcRect.offset.x || srcRect.offset.y
+     || srcRect.extent.width != src.width || srcRect.extent.height != src.height)
+      return "partial present rectangle";
+
+    return nullptr;
+  }
+
+
+  void DxvkSwapchainBlitter::presentAa(
+          DxvkContext*        ctx,
+    const Rc<DxvkImageView>&  srcView) {
+    VkExtent3D extent = srcView->imageInfo().extent;
+    VkFormat   format = srcView->info().format;
+
+    if (m_aaImage == nullptr
+     || m_aaImage->info().extent != extent
+     || m_aaImage->info().format != format)
+      this->createAaImage(extent, format);
+
+    AaArgs args;
+    args.extent = { extent.width, extent.height };
+
+    VkRect2D rect = { { 0, 0 }, { extent.width, extent.height } };
+
+    this->draw(ctx, m_fsFxaa, m_aaTargetView, rect,
+      srcView, rect, m_samplerGamma, &args, sizeof(args));
+  }
+
+
+  void DxvkSwapchainBlitter::logAa(
+          VkExtent3D          src,
+    const char*               reason) {
+    bool active = reason == nullptr;
+
+    bool changed = m_aaLogSrc != src
+                || m_aaLogActive != active;
+
+    if (!changed)
+      return;
+
+    m_aaLogSrc    = src;
+    m_aaLogActive = active;
+
+    if (active) {
+      Logger::info(str::format("panDXVK: aa: FXAA applied at ",
+        src.width, "x", src.height));
+    } else {
+      Logger::info(str::format("panDXVK: aa: not applied (", reason, "), back buffer ",
+        src.width, "x", src.height));
+    }
+  }
+
+
   void DxvkSwapchainBlitter::createSampler() {
     DxvkSamplerCreateInfo samplerInfo;
     samplerInfo.magFilter       = VK_FILTER_LINEAR;
@@ -471,6 +568,7 @@ namespace dxvk {
     SpirvCodeBuffer fsCodeResolveAmd(dxvk_present_frag_ms_amd);
     SpirvCodeBuffer fsCodeEasu(dxvk_fsr_easu_frag);
     SpirvCodeBuffer fsCodeRcas(dxvk_fsr_rcas_frag);
+    SpirvCodeBuffer fsCodeFxaa(dxvk_fxaa_frag);
     
     const std::array<DxvkResourceSlot, 2> fsResourceSlots = {{
       { BindingIds::Image, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_IMAGE_VIEW_TYPE_2D },
@@ -503,6 +601,13 @@ namespace dxvk {
       fsrInfo.pushConstSize = sizeof(FsrArgs);
       m_fsEasu = new DxvkShader(fsrInfo, std::move(fsCodeEasu));
       m_fsRcas = new DxvkShader(fsrInfo, std::move(fsCodeRcas));
+    }
+
+    if (m_aaMode == AaMode::Fxaa) {
+      DxvkShaderCreateInfo aaInfo = fsInfo;
+      aaInfo.inputMask = 0;
+      aaInfo.pushConstSize = sizeof(AaArgs);
+      m_fsFxaa = new DxvkShader(aaInfo, std::move(fsCodeFxaa));
     }
   }
 
@@ -582,6 +687,43 @@ namespace dxvk {
 
     viewInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
     m_fsrSampleView = m_device->createImageView(m_fsrImage, viewInfo);
+  }
+
+  void DxvkSwapchainBlitter::createAaImage(
+          VkExtent3D          extent,
+          VkFormat            format) {
+    DxvkImageCreateInfo imgInfo;
+    imgInfo.type = VK_IMAGE_TYPE_2D;
+    imgInfo.format = format;
+    imgInfo.flags = 0;
+    imgInfo.sampleCount = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.extent = extent;
+    imgInfo.numLayers = 1;
+    imgInfo.mipLevels = 1;
+    imgInfo.usage  = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+                   | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imgInfo.stages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                   | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    imgInfo.access = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                   | VK_ACCESS_SHADER_READ_BIT;
+    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    m_aaImage = m_device->createImage(imgInfo, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    DxvkImageViewCreateInfo viewInfo;
+    viewInfo.type = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = format;
+    viewInfo.aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.minLevel  = 0;
+    viewInfo.numLevels = 1;
+    viewInfo.minLayer  = 0;
+    viewInfo.numLayers = 1;
+
+    viewInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    m_aaTargetView = m_device->createImageView(m_aaImage, viewInfo);
+
+    viewInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+    m_aaSampleView = m_device->createImageView(m_aaImage, viewInfo);
   }
 
 }
