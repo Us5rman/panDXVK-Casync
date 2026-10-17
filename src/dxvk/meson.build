@@ -45,6 +45,10 @@ dxvk_shaders = files([
 
   'shaders/dxvk_fxaa_frag.frag',
 
+  'shaders/dxvk_smaa_edge_frag.frag',
+  'shaders/dxvk_smaa_weights_frag.frag',
+  'shaders/dxvk_smaa_blend_frag.frag',
+
   'shaders/dxvk_resolve_frag_d.frag',
   'shaders/dxvk_resolve_frag_ds.frag',
   'shaders/dxvk_resolve_frag_f.frag',
